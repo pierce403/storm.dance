@@ -1,4 +1,4 @@
-import { openDB, DBSchema, IDBPDatabase } from 'idb';
+import { openDB, DBSchema, IDBPDatabase, IDBPTransaction } from 'idb';
 
 // --- Interfaces ---
 
@@ -44,7 +44,7 @@ const DB_VERSION = 2;
 const initDB = async (): Promise<IDBPDatabase<StormDanceDB>> => {
   return openDB<StormDanceDB>(DB_NAME, DB_VERSION, {
     upgrade(db, oldVersion, newVersion, tx) {
-      console.log(`Upgrading DB from version ${oldVersion} to ${DB_VERSION}`);
+      console.log(`Upgrading DB from version ${oldVersion} to ${newVersion ?? DB_VERSION}`);
 
       if (!db.objectStoreNames.contains('notebooks')) {
         const notebooksStore = db.createObjectStore('notebooks', { keyPath: 'id' });

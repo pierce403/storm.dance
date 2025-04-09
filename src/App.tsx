@@ -1,7 +1,7 @@
-import { useState, useEffect, Dispatch, SetStateAction } from 'react';
+import { useState, useEffect } from 'react';
 import { Sidebar } from './components/notes/Sidebar';
 import { Editor } from './components/notes/Editor';
-import { Note, Notebook, dbService, CreateNoteInput, DB_NAME } from './lib/db';
+import { Note, Notebook, dbService, DB_NAME } from './lib/db';
 import './App.css';
 
 function App() {
