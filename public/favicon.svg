@@ -1,0 +1,6 @@
+<svg width="32" height="32" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill-rule="evenodd" clip-rule="evenodd" stroke-linejoin="round" stroke-miterlimit="2">
+  <path d="M50 0 L30 50 L50 50 L35 100 L70 40 L50 40 Z" fill="#FFEB3B">
+    <!-- Animation to pulse the color -->
+    <animate attributeName="fill" values="#FFEB3B;#FBC02D;#FFEB3B" dur="1.5s" repeatCount="indefinite" />
+  </path>
+</svg> 
