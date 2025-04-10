@@ -42,9 +42,9 @@
   
   --border-color: rgba(250, 204, 21, 0.2); /* Subtle yellow border */
   
-  --accent-color: #facc15;   /* Yellow - primary accent */
-  --accent-hover: #eab308;   /* Slightly darker yellow for hover */
-  --accent-light: rgba(250, 204, 21, 0.15); /* Transparent yellow for highlights */
+  --accent-color: #d4a81c;   /* Deeper, less bright yellow - primary accent */
+  --accent-hover: #b4900f;   /* Darker yellow for hover */
+  --accent-light: rgba(212, 168, 28, 0.2); /* Further reduced opacity */
   
   --shadow-color: rgba(0, 0, 0, 0.5);  /* Darker shadows */
 }
@@ -126,18 +126,34 @@
 /* Note items */
 [data-theme="dark"] button[data-note-id],
 [data-theme="dark"] [class*="draggable-note"] {
+  background-color: var(--bg-tree-view);
+  color: var(--text-secondary);
+}
+
+/* Explicit style for NON-SELECTED notes */
+[data-theme="dark"] button[data-note-id]:not([class*="font-medium"]) {
   background-color: var(--bg-tree-view) !important;
   color: var(--text-secondary) !important;
 }
 
+[data-theme="dark"] button[data-note-id]:not([class*="font-medium"]) span {
+  color: var(--text-secondary) !important;
+}
+
 /* Selected notebook and note */
-[data-theme="dark"] [class*="bg-yellow-100"],
-[data-theme="dark"] [class*="bg-yellow-900"],
-[data-theme="dark"] [class*="dark:bg-yellow-900"],
 [data-theme="dark"] button[data-note-id][class*="font-medium"],
 [data-theme="dark"] button[data-notebook-id][class*="font-medium"] {
-  background-color: var(--accent-light) !important;
-  color: var(--accent-color) !important;
+  background-color: #3b310a !important; /* MUCH darker, muted yellow/brown */
+  color: #111111 !important; /* Force dark text color on button itself */
+  border-left: 2px solid var(--accent-color) !important; /* Left border for selected items */
+  font-weight: 600 !important; /* Make text slightly bolder */
+  padding-left: calc(0.75rem - 2px) !important; /* Adjust padding to account for border */
+}
+
+/* Explicitly target the text span within selected items */
+[data-theme="dark"] button[data-note-id][class*="font-medium"] span,
+[data-theme="dark"] button[data-notebook-id][class*="font-medium"] span {
+  color: #111111 !important; /* Reiterate dark gray for span */
 }
 
 /* Folder items */
@@ -165,7 +181,13 @@
   color: var(--text-primary) !important;
 }
 
-[data-theme="dark"] p,
+/* Temporarily disable general span rule for dark mode */
+/*
+[data-theme="dark"] span:not([class*="text-yellow"]):not([class*="text-red"]) {
+  color: var(--text-secondary) !important;
+}
+*/
+
 [data-theme="dark"] span:not([class*="text-yellow"]):not([class*="text-red"]) {
   color: var(--text-secondary) !important;
 }
@@ -181,9 +203,10 @@
 }
 
 /* Yellow accent buttons */
-[data-theme="dark"] [class*="bg-yellow-"] {
+[data-theme="dark"] button[class*="bg-yellow-"],
+[data-theme="dark"] a[class*="bg-yellow-"] {
   background-color: var(--accent-color) !important;
-  color: #000000 !important;
+  color: var(--text-primary) !important;
 }
 
 /* Icon colors */
@@ -296,6 +319,79 @@
   font-weight: 500;
 }
 
+/* Fix folder name alignment in both themes */
+[data-theme="light"] [data-folder-id] span.text-sm,
+[data-theme="dark"] [data-folder-id] span.text-sm {
+  text-align: left !important;
+}
+
+/* Fix folder item flex layout */
+[data-theme="light"] [data-folder-id] > div,
+[data-theme="dark"] [data-folder-id] > div {
+  justify-content: flex-start !important;
+}
+
+/* Ensure inner content of folders aligns properly */
+[data-folder-id] div.flex.items-center.flex-1 {
+  text-align: left !important;
+  justify-content: flex-start !important;
+}
+
+/* Fix note title alignment in both themes */
+button[data-note-id] {
+  text-align: left !important;
+  padding-right: 2rem !important; /* Make room for the trash icon */
+}
+
+/* Fix delete button (trash icon) alignment */
+.absolute.right-2.top-1\/2.-translate-y-1\/2,
+button[data-note-id] + button {
+  position: absolute !important;
+  right: 0.5rem !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+}
+
+/* Fix any drag-over states with bright yellows */
+[data-theme="dark"] [class*="bg-yellow-200"],
+[data-theme="dark"] [class*="dark:bg-yellow-800"],
+[data-theme="dark"] [class*="dark:bg-yellow-900"],
+[data-theme="dark"] div[class*="drag-over"] {
+  background-color: rgba(180, 144, 15, 0.15) !important; /* More subtle yellow */
+}
+
+/* More general trash icon button alignment */
+[data-theme="light"] button[aria-label*="Delete note"],
+[data-theme="dark"] button[aria-label*="Delete note"] {
+  position: absolute !important;
+  right: 0.5rem !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  z-index: 10 !important;
+}
+
+/* Fix folder action buttons (edit/delete) positioning */
+[data-theme="light"] button[aria-label*="Rename folder"],
+[data-theme="dark"] button[aria-label*="Rename folder"],
+[data-theme="light"] button[aria-label*="Delete folder"],
+[data-theme="dark"] button[aria-label*="Delete folder"] {
+  position: static !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* Ensure folder items have room for action buttons */
+[data-folder-id] > div > div.flex.items-center.flex-1 {
+  padding-right: 1rem !important;
+  margin-right: auto !important;
+}
+
+/* Ensure note item has proper positioning context */
+.relative.group[class*="ml-"] {
+  position: relative !important;
+}
+
 /* Hover states for tree items */
 [data-theme="light"] [class*="hover:bg-gray-100"]:hover {
   background-color: rgba(234, 179, 8, 0.08) !important;
@@ -307,4 +403,9 @@
   color: white !important;
   border: none !important;
   box-shadow: 0 4px 6px var(--shadow-color) !important;
+}
+
+/* Add explicit text color for XMTP address */
+[data-theme="dark"] p[title*="Account:"] {
+  color: var(--text-secondary) !important;
 } 
