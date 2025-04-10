@@ -57,7 +57,7 @@ interface StormDanceDB extends DBSchema {
 }
 
 export const DB_NAME = 'storm.dance';
-const DB_VERSION = 3;
+const DB_VERSION = 5;
 
 let dbPromise: Promise<IDBPDatabase<StormDanceDB>> | null = null;
 
@@ -73,6 +73,23 @@ const initDB = (): Promise<IDBPDatabase<StormDanceDB>> => {
       if (!db.objectStoreNames.contains('notebooks')) {
         const notebooksStore = db.createObjectStore('notebooks', { keyPath: 'id' });
         notebooksStore.createIndex('by-updated', 'updatedAt');
+      } else if (oldVersion < 5) {
+        // V5: Remove aesKey property (migrating to password-based derivation for export/import)
+        console.log("V5 Migration: Removing 'aesKey' from notebooks...");
+        const store = tx.objectStore('notebooks');
+        (async () => { // IIFE for async operation within upgrade
+            let cursor = await store.openCursor();
+            while(cursor) {
+                const value = cursor.value as any; // Cast to any for migration
+                const aesKey = value.aesKey;
+                const { aesKey: _removed, ...rest } = value; // Use different name for removed key
+                if (aesKey !== undefined) {
+                    await cursor.update(rest);
+                }
+                cursor = await cursor.continue();
+            }
+            console.log("V5 Migration: 'aesKey' removal complete.");
+        })();
       }
 
       // Folders Store
@@ -141,12 +158,44 @@ export type CreateNotebookInput = Omit<Notebook, 'id' | 'createdAt' | 'updatedAt
 export type CreateFolderInput = Omit<Folder, 'id' | 'createdAt' | 'updatedAt'>;
 export type CreateNoteInput = Omit<Note, 'id' | 'createdAt' | 'updatedAt'>;
 
+// Helper to generate AES key
+const generateAesKey = async (): Promise<string> => {
+  const key = await crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 },
+    true, // extractable
+    ['encrypt', 'decrypt']
+  );
+  const exported = await crypto.subtle.exportKey('raw', key);
+  return arrayBufferToBase64(exported);
+};
+
+// Base64 Helpers
+export const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+};
+
+export const base64ToArrayBuffer = (base64: string): ArrayBuffer => {
+  const binary_string = atob(base64);
+  const len = binary_string.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary_string.charCodeAt(i);
+  }
+  return bytes.buffer;
+};
+
 export const dbService = {
   getDb: initDB,
 
   async _ensureDefaultNotebook(): Promise<Notebook> {
     const db = await this.getDb();
-    const allNotebooks = await db.getAll('notebooks');
+    const allNotebooks = await db.getAll('notebooks'); // No key check needed now
     if (allNotebooks.length > 0) {
       return allNotebooks.sort((a, b) => b.updatedAt - a.updatedAt)[0];
     }
@@ -155,13 +204,20 @@ export const dbService = {
 
   async getAllNotebooks(): Promise<Notebook[]> {
     const db = await this.getDb();
-    return db.getAllFromIndex('notebooks', 'by-updated').then(nbs => nbs.reverse());
+    const notebooks = await db.getAllFromIndex('notebooks', 'by-updated').then(nbs => nbs.reverse());
+    return notebooks;
   },
 
+  // Create notebook and GENERATE a new key
   async createNotebook(notebookInput: CreateNotebookInput): Promise<Notebook> {
     const db = await this.getDb();
     const timestamp = Date.now();
-    const newNotebook: Notebook = { id: crypto.randomUUID(), ...notebookInput, createdAt: timestamp, updatedAt: timestamp };
+    const newNotebook: Notebook = {
+      id: crypto.randomUUID(),
+      ...notebookInput,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
     await db.put('notebooks', newNotebook);
     return newNotebook;
   },
@@ -286,5 +342,38 @@ export const dbService = {
   async moveNoteToFolder(noteId: string, folderId: string | null): Promise<Note | undefined> {
     const targetFolderId = folderId || null;
     return this.updateNote(noteId, { folderId: targetFolderId });
+  },
+
+  async deleteNotebook(notebookId: string): Promise<boolean> {
+    const db = await this.getDb();
+    const notebook = await db.get('notebooks', notebookId);
+    if (!notebook) return false;
+
+    // Use a transaction to delete notebook, folders, and notes atomically
+    const tx = db.transaction(['notebooks', 'folders', 'notes'], 'readwrite');
+    const notesStore = tx.objectStore('notes');
+    const foldersStore = tx.objectStore('folders');
+    const notebooksStore = tx.objectStore('notebooks');
+
+    // 1. Delete all notes associated with the notebook
+    let notesCursor = await notesStore.index('by-notebook-updated').openCursor(IDBKeyRange.bound([notebookId, -Infinity], [notebookId, Infinity]));
+    while(notesCursor) {
+      await notesCursor.delete();
+      notesCursor = await notesCursor.continue();
+    }
+
+    // 2. Delete all folders associated with the notebook
+    let foldersCursor = await foldersStore.index('by-notebook').openCursor(IDBKeyRange.only(notebookId));
+    while(foldersCursor) {
+      await foldersCursor.delete();
+      foldersCursor = await foldersCursor.continue();
+    }
+
+    // 3. Delete the notebook itself
+    await notebooksStore.delete(notebookId);
+
+    await tx.done;
+    console.log(`Notebook ${notebookId} and all its contents deleted.`);
+    return true;
   },
 };

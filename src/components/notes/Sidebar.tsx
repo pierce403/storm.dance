@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef, RefObject, KeyboardEvent, forwardRef, useImperativeHandle } from 'react';
-import { Plus, Trash2, Book, Loader2, ChevronRight, ChevronDown, Folder as FolderIcon, Edit2 } from 'lucide-react';
-import { Note, Notebook, Folder } from '../../lib/db';
+import { Plus, Trash2, Book, Loader2, ChevronRight, ChevronDown, Folder as FolderIcon, Edit2, Info, Key, AlertCircle, Download } from 'lucide-react';
+import { Note, Notebook, Folder, dbService } from '../../lib/db';
 import { XmtpConnect } from '../xmtp/XmtpConnect';
 import { Client } from '@xmtp/xmtp-js';
+import { encryptBackup } from '../../lib/cryptoUtils';
+import { saveAs } from 'file-saver';
 
 // Define the handle type that will be exposed
 export interface SidebarHandle {
@@ -24,6 +26,7 @@ interface SidebarProps {
   onCreateFolder: (name: string, parentFolderId: string | null) => Promise<void>;
   onDeleteFolder: (folderId: string) => Promise<void>;
   onUpdateFolder: (folderId: string, updates: Partial<Omit<Folder, 'id' | 'createdAt' | 'updatedAt' | 'notebookId'>>) => Promise<void>;
+  onDeleteNotebook: (notebookId: string | null) => Promise<void>;
   onMoveNoteToFolder: (noteId: string, folderId: string | null) => Promise<void>;
   onMoveFolder: (folderId: string, targetParentFolderId: string | null) => Promise<void>;
   isLoading: boolean;
@@ -48,6 +51,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     onCreateFolder,
     onDeleteFolder,
     onUpdateFolder,
+    onDeleteNotebook,
     onMoveNoteToFolder,
     onMoveFolder,
   isLoading,
@@ -64,6 +68,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
   const [dragOverTargetId, setDragOverTargetId] = useState<string | null>(null);
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [folderNewName, setFolderNewName] = useState('');
+  const [infoModalNotebook, setInfoModalNotebook] = useState<Notebook | null>(null);
 
   // Refs for focusable elements (folders and notes)
   const itemRefs = useRef<Map<string, HTMLElement>>(new Map());
@@ -600,7 +605,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
             {/* Notebook List */} 
              <ul className="space-y-1 mt-2">
               {notebooks.map((notebook) => (
-                <li key={notebook.id}>
+                <li key={notebook.id} className="relative">
                   <button
                     className={`w-full flex items-center px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-yellow-400 ${selectedNotebookId === notebook.id ? "bg-gray-200 dark:bg-yellow-900/30 font-medium dark:text-yellow-100" : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
                     onClick={() => onSelectNotebook(notebook.id)}
@@ -609,6 +614,16 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                   >
                     <Book className="h-4 w-4 mr-2 flex-shrink-0 text-gray-500 dark:text-gray-400" />
                     <span className="truncate flex-1 text-left">{notebook.name}</span>
+                  </button>
+                  {/* Info Button */} 
+                  <button
+                      className="p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded absolute right-2 top-1/2 -translate-y-1/2"
+                      onClick={(e) => { e.stopPropagation(); setInfoModalNotebook(notebook); }}
+                      aria-label={`Show info for notebook ${notebook.name}`}
+                      title="Show notebook info"
+                      tabIndex={-1} // Keep non-tabbable if main button is focus target
+                  >
+                      <Info size={14} />
                   </button>
                 </li>
               ))}
@@ -701,6 +716,195 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
               )}
           </div>
       </div>
+
+      {/* Render Modal */} 
+      <NotebookInfoModal 
+          notebook={infoModalNotebook} 
+          onClose={() => setInfoModalNotebook(null)} 
+          onDelete={onDeleteNotebook}
+      />
+
     </div>
   );
 });
+
+// --- Password Prompt Modal (for Export) --- 
+const ExportPasswordModal: React.FC<{ notebookName: string; onExport: (password: string) => void; onCancel: () => void }> = ({ notebookName, onExport, onCancel }) => {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = () => {
+    if (!password) {
+      setError("Password cannot be empty.");
+      return;
+    }
+    // Optional: Add password strength check here
+    setError(null);
+    onExport(password);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={onCancel}>
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl max-w-md w-full" onClick={e => e.stopPropagation()}>
+        <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Set Export Password</h2>
+        <p className="mb-4 text-sm text-gray-600 dark:text-gray-300">Choose a strong password to encrypt the backup for <code className="bg-gray-100 dark:bg-gray-700 p-1 rounded text-xs">{notebookName}</code>. <strong className="text-red-600 dark:text-red-400">You MUST remember this password to restore the backup.</strong></p>
+        <div className="relative mb-3">
+          <Key className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Enter Password"
+            className="w-full pl-10 pr-3 py-2 border rounded-md text-sm bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-yellow-400 focus:border-yellow-400 dark:text-gray-100"
+            autoFocus
+          />
+        </div>
+        {error && <p className="mb-2 text-xs text-red-600 dark:text-red-400 flex items-center"><AlertCircle size={14} className="mr-1"/>{error}</p>}
+        <div className="flex justify-end space-x-2">
+          <button onClick={onCancel} className="px-4 py-2 bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-100 rounded hover:bg-gray-300 dark:hover:bg-gray-500">
+            Cancel
+          </button>
+          <button onClick={handleSubmit} className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 dark:bg-yellow-400 dark:text-black dark:hover:bg-yellow-500">
+            Encrypt & Export
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Notebook Info Modal Component --- 
+const NotebookInfoModal: React.FC<{
+   notebook: Notebook | null; 
+   onClose: () => void;
+   onDelete: (notebookId: string | null) => void;
+}> = ({ notebook, onClose, onDelete }) => {
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+
+  if (!notebook) return null;
+
+  const handleInitiateExport = () => {
+    // Just open the password modal
+    setShowPasswordModal(true);
+  }
+
+  const handleExportWithPassword = async (password: string) => {
+    if (!notebook) {
+        setExportError("Cannot export: Missing notebook data.");
+        return;
+    }
+    setShowPasswordModal(false);
+    setIsExporting(true);
+    setExportError(null);
+    try {
+        console.log(`Exporting notebook: ${notebook.id}`);
+        const folders = await dbService.getAllFolders(notebook.id);
+        const notes = await dbService.getAllNotes(notebook.id);
+
+        // Create path structure
+        const folderMap = new Map<string, Folder>();
+        const folderPathMap = new Map<string, string>(); // Map ID to relative path
+        folders.forEach(f => folderMap.set(f.id, f));
+
+        const getPath = (folderId: string | null): string | null => {
+            if (!folderId) return null;
+            if (folderPathMap.has(folderId)) return folderPathMap.get(folderId)!;
+
+            const folder = folderMap.get(folderId);
+            if (!folder) return null; // Should not happen
+
+            const parentPath = getPath(folder.parentFolderId);
+            const currentPath = parentPath ? `${parentPath}/${folder.name}` : folder.name;
+            folderPathMap.set(folderId, currentPath);
+            return currentPath;
+        };
+
+        // Ensure all paths are generated
+        folders.forEach(f => getPath(f.id));
+
+        const exportData = {
+            notebook: {
+                id: notebook.id, // Include original ID for reference
+                name: notebook.name,
+            },
+            folders: folders.map(f => ({
+                id: f.id,
+                name: f.name,
+                parentPath: getPath(f.parentFolderId),
+            })),
+            notes: notes.map(n => ({
+                id: n.id,
+                folderPath: getPath(n.folderId),
+                title: n.title,
+                content: n.content,
+                createdAt: n.createdAt,
+                updatedAt: n.updatedAt,
+            })),
+        };
+
+        // Encrypt using password
+        const wrapperJson = await encryptBackup(password, exportData);
+
+        // Create blob from the wrapper JSON string
+        const blob = new Blob([JSON.stringify(wrapperJson, null, 2)], { type: 'application/json' });
+        const filename = `${notebook.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}-backup.json.encrypted`; // New filename
+        saveAs(blob, filename);
+
+    } catch (error) {
+        console.error("Export failed:", error);
+        setExportError(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+        setIsExporting(false);
+    }
+  };
+
+  const handleDeleteClick = () => {
+    onDelete(notebook?.id ?? null);
+    onClose(); // Close modal after initiating delete
+  };
+
+  // Simple modal styling - replace with a proper modal library later if needed
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl max-w-md w-full" onClick={e => e.stopPropagation()}>
+        <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Notebook Info: {notebook.name}</h2>
+        <div className="space-y-2 text-sm">
+          <p><strong className="text-gray-600 dark:text-gray-400">ID:</strong> <span className="text-gray-800 dark:text-gray-200 break-all">{notebook.id}</span></p>
+          <p><strong className="text-gray-600 dark:text-gray-400">Created:</strong> <span className="text-gray-800 dark:text-gray-200">{new Date(notebook.createdAt).toLocaleString()}</span></p>
+          <p><strong className="text-gray-600 dark:text-gray-400">Updated:</strong> <span className="text-gray-800 dark:text-gray-200">{new Date(notebook.updatedAt).toLocaleString()}</span></p>
+        </div>
+        <div className="mt-4 flex justify-between items-center">
+          <div className="flex space-x-2">
+            {/* Export Button */}
+            <button 
+              onClick={handleInitiateExport} 
+              disabled={isExporting}
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-yellow-400 dark:text-black dark:hover:bg-yellow-500 flex items-center"
+            >
+              {isExporting ? 'Exporting...' : <><Download size={14} className="mr-1 inline-block"/>Export</>}
+            </button>
+            {/* Delete Button */}
+            <button
+              onClick={handleDeleteClick}
+              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 flex items-center"
+            >
+              <Trash2 size={14} className="mr-1 inline-block" /> Delete
+            </button>
+          </div>
+          <button onClick={onClose} className="px-4 py-2 bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-100 rounded hover:bg-gray-300 dark:hover:bg-gray-500">
+            Close
+          </button>
+        </div>
+        {showPasswordModal && notebook && (
+          <ExportPasswordModal 
+              notebookName={notebook.name}
+              onExport={handleExportWithPassword}
+              onCancel={() => setShowPasswordModal(false)}
+          />
+        )}
+      </div>
+    </div>
+  );
+};

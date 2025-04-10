@@ -2,11 +2,76 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Sidebar, SidebarHandle } from './components/notes/Sidebar';
 import { Editor } from './components/notes/Editor';
 import { EditorTabs } from './components/notes/EditorTabs';
-import { Note, Notebook, Folder, dbService, DB_NAME } from './lib/db';
+import { Note, Notebook, Folder, dbService, DB_NAME, base64ToArrayBuffer } from './lib/db';
 import { Client } from '@xmtp/xmtp-js';
-import { Sun, Moon } from 'lucide-react';
+import { Sun, Moon, Upload, Key, AlertCircle } from 'lucide-react';
 import './App.css';
 import './DarkTheme.css';
+import { decryptBackup } from './lib/cryptoUtils';
+
+// --- Types for Import --- 
+interface ExportedFolder {
+  id: string;
+  name: string;
+  parentPath: string | null;
+}
+interface ExportedNote {
+  id: string;
+  folderPath: string | null;
+  title: string;
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+}
+interface ExportedData {
+  notebook: { id: string; name: string };
+  folders: ExportedFolder[];
+  notes: ExportedNote[];
+}
+
+// --- Import Password Modal --- 
+const ImportPasswordModal: React.FC<{ fileName: string; onImport: (password: string) => void; onCancel: () => void }> = ({ fileName, onImport, onCancel }) => {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = () => {
+    if (!password) {
+      setError("Password cannot be empty.");
+      return;
+    }
+    setError(null);
+    onImport(password);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={onCancel}>
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl max-w-md w-full" onClick={e => e.stopPropagation()}>
+        <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Import Password Required</h2>
+        <p className="mb-4 text-sm text-gray-600 dark:text-gray-300">Enter the password used to encrypt the backup file <code className="bg-gray-100 dark:bg-gray-700 p-1 rounded text-xs">{fileName}</code>.</p>
+        <div className="relative mb-4">
+          <Key className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Enter Password"
+            className="w-full pl-10 pr-3 py-2 border rounded-md text-sm bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-yellow-400 focus:border-yellow-400 dark:text-gray-100"
+            autoFocus
+          />
+        </div>
+        {error && <p className="mb-2 text-xs text-red-600 dark:text-red-400 flex items-center"><AlertCircle size={14} className="mr-1"/>{error}</p>}
+        <div className="flex justify-end space-x-2">
+          <button onClick={onCancel} className="px-4 py-2 bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-100 rounded hover:bg-gray-300 dark:hover:bg-gray-500">
+            Cancel
+          </button>
+          <button onClick={handleSubmit} className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 dark:bg-yellow-400 dark:text-black dark:hover:bg-yellow-500">
+            Import
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 function App() {
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
@@ -21,6 +86,9 @@ function App() {
   const [isDbBlocked, setIsDbBlocked] = useState(false);
   const [toastMessage, setToastMessage] = useState<{title: string, description: string, variant?: 'default' | 'destructive'} | null>(null);
   const [activeColumn, setActiveColumn] = useState<'notebooks' | 'notes' | 'editor'>('notes');
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const savedTheme = localStorage.getItem('theme');
@@ -366,6 +434,49 @@ function App() {
       setUserAddress(null);
   };
 
+  // --- Notebook Deletion --- 
+  const handleDeleteNotebook = async (notebookId: string | null) => {
+    if (!notebookId) return;
+
+    const notebookToDelete = notebooks.find(nb => nb.id === notebookId);
+    if (!notebookToDelete) return;
+
+    // Confirmation
+    if (!window.confirm(`Are you sure you want to permanently delete the notebook "${notebookToDelete.name}" and all its contents? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const success = await dbService.deleteNotebook(notebookId);
+      if (success) {
+        showToast('Success', `Notebook "${notebookToDelete.name}" deleted.`);
+        const remainingNotebooks = notebooks.filter(nb => nb.id !== notebookId);
+        setNotebooks(remainingNotebooks);
+
+        // Select the first remaining notebook or null if none left
+        const newSelectedId = remainingNotebooks[0]?.id || null;
+        setSelectedNotebookId(newSelectedId);
+        if (!newSelectedId) {
+            // Clear notes/folders if no notebook is selected
+            setNotes([]);
+            setFolders([]);
+            setOpenNoteIds([]);
+            setActiveNoteId(null);
+        }
+
+        // Close the info modal if it was open for the deleted notebook
+        // (Need to pass setInfoModalNotebook down or handle state differently)
+        // For now, assumes modal is managed within Sidebar
+        
+      } else {
+        showToast('Error', 'Failed to delete notebook. Notebook not found.', 'destructive');
+      }
+    } catch (error) {
+      console.error("Failed to delete notebook:", error);
+      showToast('Error', `Failed to delete notebook: ${error instanceof Error ? error.message : 'Unknown error'}`, 'destructive');
+    }
+  };
+
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
@@ -373,6 +484,115 @@ function App() {
 
   const toggleTheme = () => {
     setTheme(prevTheme => (prevTheme === 'light' ? 'dark' : 'light'));
+  };
+
+  // --- Import Logic --- 
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      // Basic validation
+      if (!file.name.toLowerCase().endsWith('.json.encrypted') && !file.name.toLowerCase().endsWith('.json')) {
+        showToast('Error', 'Invalid file type. Please select a .json.encrypted file.', 'destructive');
+        event.target.value = ''; 
+        return;
+      }
+      if (file.size > 50 * 1024 * 1024) { // 50MB limit
+        showToast('Error', 'File too large (max 50MB)', 'destructive');
+        event.target.value = ''; 
+        return;
+      }
+      setImportFile(file);
+      setShowPasswordModal(true);
+    }
+    event.target.value = ''; 
+  };
+
+  const handleImportWithPassword = async (password: string) => {
+    if (!importFile) return;
+    setShowPasswordModal(false);
+    setIsImporting(true);
+    showToast('Importing', `Processing ${importFile.name}...`);
+
+    try {
+      const fileContent = await importFile.text(); // Read as text first
+      const wrapperJson = JSON.parse(fileContent);
+      const decryptedData: ExportedData = await decryptBackup(password, wrapperJson);
+
+      // --- Data Validation (Basic) --- 
+      if (!decryptedData || typeof decryptedData !== 'object' || 
+          !decryptedData.notebook || typeof decryptedData.notebook.name !== 'string' ||
+          !Array.isArray(decryptedData.folders) || !Array.isArray(decryptedData.notes)) {
+         throw new Error("Invalid file structure after decryption.");
+      }
+
+      // --- Database Import --- 
+      // 1. Create the new notebook (key is derived, not stored)
+      const newNotebook = await dbService.createNotebook({ 
+          name: decryptedData.notebook.name || `Imported Notebook (${new Date().toLocaleTimeString()})`
+      });
+
+      // 2. Recreate folder structure
+      const createdFolderMap = new Map<string | null, string>(); // Map oldPath -> newFolderId
+      createdFolderMap.set(null, 'root'); // Represent root
+
+      // Sort folders to process parents before children (simple path depth sort)
+      const sortedFolders = [...decryptedData.folders].sort((a, b) => 
+          (a.parentPath?.split('/').length ?? 0) - (b.parentPath?.split('/').length ?? 0)
+      );
+
+      for (const exportedFolder of sortedFolders) {
+          const parentFolderId = createdFolderMap.get(exportedFolder.parentPath) ?? null;
+          if (parentFolderId === 'root') { // Root folder
+              const newFolder = await dbService.createFolder({ 
+                  notebookId: newNotebook.id, 
+                  name: exportedFolder.name, 
+                  parentFolderId: null 
+              });
+              createdFolderMap.set(exportedFolder.name, newFolder.id); // Map path to new ID
+          } else if (parentFolderId) { // Nested folder
+              const newFolder = await dbService.createFolder({ 
+                  notebookId: newNotebook.id, 
+                  name: exportedFolder.name, 
+                  parentFolderId: parentFolderId 
+              });
+              const currentPath = `${exportedFolder.parentPath}/${exportedFolder.name}`;
+              createdFolderMap.set(currentPath, newFolder.id);
+          } else {
+              console.warn(`Could not find parent folder ID for path: ${exportedFolder.parentPath}. Skipping folder: ${exportedFolder.name}`);
+          }
+      }
+
+      // 3. Create notes
+      for (const exportedNote of decryptedData.notes) {
+          const folderId = createdFolderMap.get(exportedNote.folderPath) ?? null;
+          const targetFolderId = folderId === 'root' ? null : folderId;
+          await dbService.createNote({ 
+              notebookId: newNotebook.id, 
+              folderId: targetFolderId,
+              title: exportedNote.title,
+              content: exportedNote.content,
+              // Consider using original timestamps or resetting them
+              // createdAt: exportedNote.createdAt, 
+              // updatedAt: exportedNote.updatedAt,
+          });
+      }
+
+      setNotebooks(nbs => [newNotebook, ...nbs]); // Add to UI list
+      setSelectedNotebookId(newNotebook.id); // Select the newly imported notebook
+      showToast('Success', `Notebook '${newNotebook.name}' imported successfully.`);
+
+    } catch (error) {
+      console.error("Import failed:", error);
+      showToast('Import Failed', error instanceof Error ? error.message : 'Unknown error', 'destructive');
+    } finally {
+      setImportFile(null);
+      setIsImporting(false);
+    }
+  };
+
+  const handleCancelImport = () => {
+    setImportFile(null);
+    setShowPasswordModal(false);
   };
 
   if (isDbBlocked) {
@@ -402,13 +622,29 @@ function App() {
     <div className={`flex flex-col h-screen bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 font-sans antialiased`}>
       <header className="border-b p-4 flex justify-between items-center bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700">
         <h1 className="text-2xl font-bold">storm.dance</h1>
-        <button 
-          onClick={toggleTheme} 
-          className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-yellow-400"
-          aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
-        >
-          {theme === 'light' ? <Moon className="h-5 w-5 text-yellow-600" /> : <Sun className="h-5 w-5 text-yellow-500" />}
-        </button>
+        <div className="flex items-center space-x-2">
+          {/* Import Button */} 
+         <label className={`px-3 py-1.5 text-sm rounded-md flex items-center cursor-pointer 
+                           bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 
+                           ${isImporting ? 'opacity-50 cursor-not-allowed' : ''}`}>
+             <Upload size={14} className="mr-1"/>
+             Import
+             <input 
+                 type="file" 
+                 className="hidden" 
+                 accept=".json,.json.encrypted" // Accept both for flexibility
+                 onChange={handleFileChange}
+                 disabled={isImporting}
+             />
+         </label>
+          <button 
+            onClick={toggleTheme} 
+            className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-yellow-400"
+            aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+          >
+            {theme === 'light' ? <Moon className="h-5 w-5 text-yellow-600" /> : <Sun className="h-5 w-5 text-yellow-500" />}
+          </button>
+        </div>
       </header>
       
       <main className="flex-1 overflow-hidden">
@@ -433,6 +669,7 @@ function App() {
               onCreateFolder={handleCreateFolder}
               onDeleteFolder={handleDeleteFolder}
               onUpdateFolder={handleUpdateFolder}
+              onDeleteNotebook={handleDeleteNotebook}
               onMoveNoteToFolder={handleMoveNoteToFolder}
               onMoveFolder={handleMoveFolder}
               isLoading={isLoading}
@@ -478,6 +715,15 @@ function App() {
         </div>
       </main>
       
+      {/* Import Password Modal Render */} 
+      {showPasswordModal && importFile && (
+         <ImportPasswordModal 
+             fileName={importFile.name}
+             onImport={handleImportWithPassword}
+             onCancel={handleCancelImport}
+         />
+      )}
+
       {toastMessage && (
         <div className={`fixed bottom-4 right-4 p-4 rounded-md shadow-lg text-white ${ 
           toastMessage.variant === 'destructive' 

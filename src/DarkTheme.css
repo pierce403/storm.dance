@@ -408,4 +408,77 @@ button[data-note-id] + button {
 /* Add explicit text color for XMTP address */
 [data-theme="dark"] p[title*="Account:"] {
   color: var(--text-secondary) !important;
+}
+
+/* Styling for Notebook Info Button */
+[data-theme="light"] button[aria-label*="Show info"] {
+  color: #9ca3af; /* Muted gray */
+}
+[data-theme="light"] button[aria-label*="Show info"]:hover {
+  color: var(--text-secondary);
+  background-color: transparent !important; /* Override general button hover */
+}
+[data-theme="dark"] button[aria-label*="Show info"] {
+  color: #6b7280; /* Darker muted gray */
+}
+[data-theme="dark"] button[aria-label*="Show info"]:hover {
+  color: var(--text-muted);
+  background-color: transparent !important; /* Override general button hover */
+}
+
+/* Ensure Info button is visible */
+button[aria-label*="Show info"] {
+  display: inline-flex !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Styling for Notebook Info Modal */
+[data-theme="light"] .fixed.inset-0[class*="bg-black"] {
+  background-color: rgba(0, 0, 0, 0.5) !important;
+}
+[data-theme="light"] .fixed.inset-0 > div[class*="bg-white"] {
+  background-color: var(--bg-editor) !important; /* Use editor bg */
+  color: var(--text-primary) !important;
+}
+[data-theme="light"] .fixed.inset-0 strong {
+  color: var(--text-muted) !important;
+}
+[data-theme="light"] .fixed.inset-0 span {
+  color: var(--text-secondary) !important;
+}
+[data-theme="light"] .fixed.inset-0 span[class*="bg-gray-100"] {
+  background-color: var(--bg-sidebar) !important;
+  color: var(--text-muted) !important;
+}
+[data-theme="light"] .fixed.inset-0 button[class*="bg-gray-200"] {
+  background-color: var(--bg-sidebar) !important;
+  color: var(--text-secondary) !important;
+}
+[data-theme="light"] .fixed.inset-0 button[class*="hover:bg-gray-300"]:hover {
+  background-color: var(--bg-header) !important;
+}
+
+[data-theme="dark"] .fixed.inset-0[class*="bg-black"] {
+  background-color: rgba(0, 0, 0, 0.7) !important;
+}
+[data-theme="dark"] .fixed.inset-0 > div[class*="bg-gray-800"] {
+  background-color: var(--bg-sidebar) !important; /* Use sidebar bg */
+}
+[data-theme="dark"] .fixed.inset-0 strong {
+  color: var(--text-muted) !important;
+}
+[data-theme="dark"] .fixed.inset-0 span {
+  color: var(--text-secondary) !important;
+}
+[data-theme="dark"] .fixed.inset-0 span[class*="bg-gray-700"] {
+  background-color: var(--bg-tree-view) !important;
+  color: var(--text-muted) !important;
+}
+[data-theme="dark"] .fixed.inset-0 button[class*="bg-gray-600"] {
+  background-color: var(--bg-tree-view) !important;
+  color: var(--text-secondary) !important;
+}
+[data-theme="dark"] .fixed.inset-0 button[class*="hover:bg-gray-500"]:hover {
+  background-color: var(--bg-header) !important;
 } 
