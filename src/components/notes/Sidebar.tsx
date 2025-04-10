@@ -3,6 +3,14 @@ import { Plus, Trash2, Book, Loader2, ChevronRight, ChevronDown, Folder as Folde
 import { Note, Notebook, Folder } from '../../lib/db';
 import { XmtpConnect } from '../xmtp/XmtpConnect';
 import { Client } from '@xmtp/xmtp-js';
+import {
+  Menu,
+  Item,
+  Separator,
+  Submenu,
+  useContextMenu,
+  ItemParams,
+} from "react-contexify";
 
 // Type definition for focusable items in the list
 type FocusableItem = {
@@ -86,18 +94,6 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
       itemRefs.current.set(key, el);
     } else {
       itemRefs.current.delete(key);
-    }
-  };
-
-  const handleCreateNotebookSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newNotebookName.trim()) return;
-    try {
-      await onCreateNotebook(newNotebookName.trim());
-      setNewNotebookName('');
-      setIsCreatingNotebook(false);
-    } catch (error) {
-      console.error('Failed to create notebook:', error);
     }
   };
 

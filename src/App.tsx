@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, KeyboardEvent, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Sidebar, SidebarHandle } from './components/notes/Sidebar';
 import { Editor } from './components/notes/Editor';
 import { EditorTabs } from './components/notes/EditorTabs';
@@ -23,7 +23,6 @@ function App() {
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [activeColumn, setActiveColumn] = useState<'notebooks' | 'notes' | 'editor'>('notes');
 
-  const notebooksColumnRef = useRef<HTMLDivElement>(null);
   const notesColumnRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const editorTitleInputRef = useRef<HTMLInputElement>(null);
@@ -77,8 +76,6 @@ function App() {
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: globalThis.KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-
       if (e.key === 'Tab') {
         e.preventDefault();
         const shiftPressed = e.shiftKey;
@@ -244,7 +241,7 @@ function App() {
       await dbService.deleteNote(id);
 
       const updatedNotes = notes.filter(note => note.id !== id);
-      setNotes(updatedNotes);
+      setNotes(updatedNotes.sort((a, b) => b.updatedAt - a.updatedAt));
 
       if (openNoteIds.includes(id)) {
           handleCloseTab(id);
@@ -341,24 +338,6 @@ function App() {
     }
   };
 
-  const handleDragStart = (noteId: string) => {
-    setDraggedNoteId(noteId);
-  };
-
-  const handleDragOver = (folderId: string | null, e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOverFolderId(folderId);
-  };
-
-  const handleDragEnd = async () => {
-    if (draggedNoteId && dragOverFolderId !== undefined) {
-      await handleMoveNoteToFolder(draggedNoteId, dragOverFolderId);
-    }
-    
-    setDraggedNoteId(null);
-    setDragOverFolderId(null);
-  };
-  
   const handleClearStorage = async () => {
     console.log(`Attempting to delete IndexedDB database: ${DB_NAME}`);
     try {
