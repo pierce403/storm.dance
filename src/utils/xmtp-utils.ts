@@ -3,9 +3,15 @@ import { Client } from '@xmtp/xmtp-js';
 // Import from our buffer setup file to ensure Buffer is properly initialized
 import '../buffer-setup.js';
 
+// Define the XMTP network environments
+export type XmtpEnv = 'dev' | 'production';
+
 // This function wraps the XMTP client creation with additional polyfills and error handling
-export async function createXmtpClientSafely(signer: ethers.Signer): Promise<Client> {
-  console.log("Creating XMTP client with safety measures...");
+export async function createXmtpClientSafely(
+  signer: ethers.Signer, 
+  env: XmtpEnv = 'dev'
+): Promise<Client> {
+  console.log(`Creating XMTP client with safety measures... (Environment: ${env})`);
   
   // Ensure process is available
   if (typeof process === 'undefined' || !process.env) {
@@ -39,12 +45,12 @@ export async function createXmtpClientSafely(signer: ethers.Signer): Promise<Cli
   }
   
   try {
-    console.log("Attempting to create XMTP client...");
+    console.log(`Attempting to create XMTP client on the ${env} network...`);
     
     // Create client with a timeout and explicit env setting
     const client = await Promise.race([
       Client.create(signer, { 
-        env: "dev",
+        env: env,
         skipContactPublishing: false,  // Ensure contacts are published
         persistConversations: true     // Ensure conversations are persisted
       }),
@@ -55,7 +61,7 @@ export async function createXmtpClientSafely(signer: ethers.Signer): Promise<Cli
     
     // Return the client first, then list conversations asynchronously
     // This ensures the app can continue without waiting for conversation listing
-    console.log("XMTP client created successfully, client address:", client.address);
+    console.log(`XMTP client created successfully on the ${env} network, client address:`, client.address);
     
     // Wait a moment for the client to fully initialize before listing conversations
     setTimeout(async () => {
