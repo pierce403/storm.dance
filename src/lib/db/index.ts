@@ -158,17 +158,6 @@ export type CreateNotebookInput = Omit<Notebook, 'id' | 'createdAt' | 'updatedAt
 export type CreateFolderInput = Omit<Folder, 'id' | 'createdAt' | 'updatedAt'>;
 export type CreateNoteInput = Omit<Note, 'id' | 'createdAt' | 'updatedAt'>;
 
-// Helper to generate AES key
-const generateAesKey = async (): Promise<string> => {
-  const key = await crypto.subtle.generateKey(
-    { name: 'AES-GCM', length: 256 },
-    true, // extractable
-    ['encrypt', 'decrypt']
-  );
-  const exported = await crypto.subtle.exportKey('raw', key);
-  return arrayBufferToBase64(exported);
-};
-
 // Base64 Helpers
 export const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
   let binary = '';

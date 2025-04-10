@@ -117,7 +117,6 @@ export const decryptBackup = async (password: string, wrapper: any): Promise<any
         const jsonString = pako.inflate(new Uint8Array(decryptedCompressedBuffer), { to: 'string' });
 
         // 6. Parse JSON
-        const decoder = new TextDecoder();
         return JSON.parse(jsonString);
 
     } catch (error) {

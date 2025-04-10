@@ -17,12 +17,6 @@ export function EditorTabs({
   onCloseTab,
 }: EditorTabsProps) {
   
-  // Helper to get note title, falling back to 'Untitled' or ID if not found
-  const getNoteTitle = (id: string): string => {
-      const note = notes.find(n => n.id === id);
-      return note?.title || 'Untitled';
-  };
-
   const openNotes = openNoteIds.map(id => notes.find(note => note.id === id)).filter((note): note is Note => note !== undefined);
 
   return (

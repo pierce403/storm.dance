@@ -780,7 +780,6 @@ const NotebookInfoModal: React.FC<{
    onDelete: (notebookId: string | null) => void;
 }> = ({ notebook, onClose, onDelete }) => {
   const [isExporting, setIsExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
 
   if (!notebook) return null;
@@ -792,12 +791,12 @@ const NotebookInfoModal: React.FC<{
 
   const handleExportWithPassword = async (password: string) => {
     if (!notebook) {
-        setExportError("Cannot export: Missing notebook data.");
-        return;
+        // Maybe use toast notification instead of modal error state
+        console.error("Cannot export: Missing notebook data."); 
+          return;
     }
     setShowPasswordModal(false);
     setIsExporting(true);
-    setExportError(null);
     try {
         console.log(`Exporting notebook: ${notebook.id}`);
         const folders = await dbService.getAllFolders(notebook.id);
@@ -854,7 +853,8 @@ const NotebookInfoModal: React.FC<{
 
     } catch (error) {
         console.error("Export failed:", error);
-        setExportError(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
+        // Use toast notification for errors
+        // Example: showToast('Export Failed', `...`, 'destructive');
     } finally {
         setIsExporting(false);
     }

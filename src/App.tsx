@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Sidebar, SidebarHandle } from './components/notes/Sidebar';
 import { Editor } from './components/notes/Editor';
 import { EditorTabs } from './components/notes/EditorTabs';
-import { Note, Notebook, Folder, dbService, DB_NAME, base64ToArrayBuffer } from './lib/db';
+import { Note, Notebook, Folder, dbService, DB_NAME } from './lib/db';
 import { Client } from '@xmtp/xmtp-js';
 import { Sun, Moon, Upload, Key, AlertCircle } from 'lucide-react';
 import './App.css';
