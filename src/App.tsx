@@ -5,7 +5,6 @@ import { EditorTabs } from './components/notes/EditorTabs';
 import { Note, Notebook, Folder, dbService, DB_NAME } from './lib/db';
 import { Client } from '@xmtp/xmtp-js';
 import './App.css';
-import { Book } from 'lucide-react';
 
 function App() {
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
@@ -19,8 +18,6 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isDbBlocked, setIsDbBlocked] = useState(false);
   const [toastMessage, setToastMessage] = useState<{title: string, description: string, variant?: 'default' | 'destructive'} | null>(null);
-  const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
-  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [activeColumn, setActiveColumn] = useState<'notebooks' | 'notes' | 'editor'>('notes');
 
   const notesColumnRef = useRef<HTMLDivElement>(null);
@@ -410,7 +407,6 @@ function App() {
               folders={folders}
               selectedNoteId={activeNoteId}
               onSelectNotebook={setSelectedNotebookId}
-              onCreateNotebook={handleCreateNotebook}
               onSelectNote={handleSelectNote}
               onCreateNote={handleCreateNote}
               onDeleteNote={handleDeleteNote}

@@ -3,21 +3,6 @@ import { Plus, Trash2, Book, Loader2, ChevronRight, ChevronDown, Folder as Folde
 import { Note, Notebook, Folder } from '../../lib/db';
 import { XmtpConnect } from '../xmtp/XmtpConnect';
 import { Client } from '@xmtp/xmtp-js';
-import {
-  Menu,
-  Item,
-  Separator,
-  Submenu,
-  useContextMenu,
-  ItemParams,
-} from "react-contexify";
-
-// Type definition for focusable items in the list
-type FocusableItem = {
-  type: 'folder' | 'note';
-  id: string;
-  elementRef?: HTMLElement | null; // Store ref for focusing
-};
 
 // Define the handle type that will be exposed
 export interface SidebarHandle {
@@ -33,7 +18,6 @@ interface SidebarProps {
   folders: Folder[];
   selectedNoteId: string | null;
   onSelectNotebook: (notebookId: string) => void;
-  onCreateNotebook: (name: string) => Promise<Notebook | null>;
   onSelectNote: (note: Note) => void;
   onCreateNote: (folderId?: string | null) => Promise<Note | null>;
   onDeleteNote: (noteId: string) => void;
@@ -58,7 +42,6 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     folders,
     selectedNoteId,
     onSelectNotebook,
-    onCreateNotebook,
     onSelectNote,
     onCreateNote,
     onDeleteNote,
@@ -72,8 +55,6 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     editorTitleInputRef
   }, ref) => {
 
-  const [isCreatingNotebook, setIsCreatingNotebook] = useState(false);
-  const [newNotebookName, setNewNotebookName] = useState('');
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderParentId, setNewFolderParentId] = useState<string | null>(null);
@@ -198,7 +179,6 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement ||
-        isCreatingNotebook ||
         isCreatingFolder ||
         renamingFolderId !== null
       ) {
@@ -326,7 +306,6 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     folders,
     expandedFolders,
     selectedNotebookId,
-    isCreatingNotebook,
     isCreatingFolder,
     renamingFolderId,
     onCreateNote, // Add onCreateNote
@@ -380,7 +359,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
      // setDragOverTargetId(null); // This might flicker
   };
 
-    const handleDragEnd = (e: React.DragEvent) => {
+    const handleDragEnd = (_e: React.DragEvent) => {
         // Always clear drag state when drag operation ends (successfully or not)
         setDraggedItemId(null);
         setDraggedItemType(null);
@@ -612,7 +591,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                 <h2 className="text-lg font-semibold">Notebooks</h2>
                 <button
                     className="p-2 rounded-md hover:bg-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                    onClick={() => setIsCreatingNotebook(true)}
+                    onClick={() => { /* TODO: Implement create notebook UI */ }}
                     aria-label="Create new notebook"
                     tabIndex={-1}
                 >

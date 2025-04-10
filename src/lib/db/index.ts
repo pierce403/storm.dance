@@ -1,4 +1,4 @@
-import { openDB, deleteDB, IDBPDatabase, DBSchema } from 'idb';
+import { openDB, IDBPDatabase, DBSchema } from 'idb';
 
 // --- Interface Definitions ---
 
@@ -56,11 +56,8 @@ interface StormDanceDB extends DBSchema {
   };
 }
 
-export const DB_NAME = 'storm-dance-db';
+export const DB_NAME = 'storm.dance';
 const DB_VERSION = 3;
-
-// Use type alias for store names
-type StoreName = keyof StormDanceDB;
 
 let dbPromise: Promise<IDBPDatabase<StormDanceDB>> | null = null;
 
