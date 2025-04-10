@@ -1,13 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, RefObject } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Note } from '../../lib/db';
 
 interface EditorProps {
   note: Note | null;
   onUpdateNote: (id: string, updates: Partial<Note>) => void;
+  titleInputRef?: RefObject<HTMLInputElement>;
+  textAreaRef?: RefObject<HTMLTextAreaElement>;
 }
 
-export function Editor({ note, onUpdateNote }: EditorProps) {
+export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: EditorProps) {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [activeTab, setActiveTab] = useState('edit');
@@ -54,6 +56,7 @@ export function Editor({ note, onUpdateNote }: EditorProps) {
         onChange={handleTitleChange}
         placeholder="Note title"
         className="text-xl font-semibold mb-4 p-2 border-b focus:outline-none focus:border-blue-500"
+        ref={titleInputRef}
       />
       <div className="flex-1 flex flex-col">
         <div className="border-b mb-2">
@@ -77,6 +80,7 @@ export function Editor({ note, onUpdateNote }: EditorProps) {
             onChange={handleContentChange}
             placeholder="Write your note in Markdown..."
             className="flex-1 resize-none font-mono p-2 border rounded-md focus:outline-none focus:border-blue-500"
+            ref={textAreaRef}
           />
         ) : (
           <div className="flex-1 overflow-auto p-4 border rounded-md">

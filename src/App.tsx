@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
-import { Sidebar } from './components/notes/Sidebar';
+import { useState, useEffect, useRef, KeyboardEvent, useCallback } from 'react';
+import { Sidebar, SidebarHandle } from './components/notes/Sidebar';
 import { Editor } from './components/notes/Editor';
 import { EditorTabs } from './components/notes/EditorTabs';
 import { Note, Notebook, Folder, dbService, DB_NAME } from './lib/db';
 import { Client } from '@xmtp/xmtp-js';
 import './App.css';
+import { Book } from 'lucide-react';
 
 function App() {
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
@@ -20,6 +21,16 @@ function App() {
   const [toastMessage, setToastMessage] = useState<{title: string, description: string, variant?: 'default' | 'destructive'} | null>(null);
   const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [activeColumn, setActiveColumn] = useState<'notebooks' | 'notes' | 'editor'>('notes');
+
+  const notebooksColumnRef = useRef<HTMLDivElement>(null);
+  const notesColumnRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const editorTitleInputRef = useRef<HTMLInputElement>(null);
+  const editorTextAreaRef = useRef<HTMLTextAreaElement>(null);
+
+  const sidebarRef = useRef<SidebarHandle>(null);
+  const notebooksListRef = useRef<HTMLUListElement>(null);
 
   const getNoteById = (id: string | null): Note | null => {
       if (!id) return null;
@@ -30,6 +41,87 @@ function App() {
   const showToast = (title: string, description: string, variant: 'default' | 'destructive' = 'default') => {
     setToastMessage({ title, description, variant });
     setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleCreateNote = useCallback(async (folderId: string | null = null) => {
+    if (!selectedNotebookId) {
+        showToast('Error', 'Please select a notebook first', 'destructive');
+        return null;
+    }
+    try {
+      console.log(`Creating note in folder: ${folderId}`);
+      const newNote = await dbService.createNote({
+        notebookId: selectedNotebookId!,
+        title: 'Untitled',
+        content: '',
+        folderId: folderId
+      });
+
+      setNotes(prevNotes => [newNote, ...prevNotes].sort((a,b) => b.updatedAt - a.updatedAt));
+      setOpenNoteIds(prev => [...new Set([...prev, newNote.id])]);
+      setActiveNoteId(newNote.id);
+
+      setTimeout(() => {
+        sidebarRef.current?.focusItem('note', newNote.id);
+        setTimeout(() => editorTitleInputRef.current?.focus(), 50);
+      }, 0);
+
+      showToast('Success', 'New note created');
+      return newNote;
+    } catch (error) {
+      console.error('Failed to create note:', error);
+      showToast('Error', 'Failed to create note', 'destructive');
+      return null;
+    }
+  }, [selectedNotebookId, showToast]);
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: globalThis.KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const shiftPressed = e.shiftKey;
+        let nextColumn: 'notebooks' | 'notes' | 'editor' | null = null;
+
+        if (shiftPressed) {
+          if (activeColumn === 'editor') nextColumn = 'notes';
+          else if (activeColumn === 'notes') nextColumn = 'notebooks';
+          else if (activeColumn === 'notebooks') nextColumn = 'editor';
+        } else {
+          if (activeColumn === 'notebooks') nextColumn = 'notes';
+          else if (activeColumn === 'notes') nextColumn = 'editor';
+          else if (activeColumn === 'editor') nextColumn = 'notebooks';
+        }
+
+        if (nextColumn) {
+          focusColumn(nextColumn);
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleGlobalKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleGlobalKeyDown);
+    };
+  }, [activeColumn, selectedNotebookId, activeNoteId]);
+
+  const focusColumn = (column: 'notebooks' | 'notes' | 'editor') => {
+    setActiveColumn(column);
+    if (column === 'notebooks') {
+        const targetButton = notebooksListRef.current?.querySelector(
+            selectedNotebookId ? `button[data-notebook-id="${selectedNotebookId}"]` : 'button'
+        ) as HTMLButtonElement | null;
+        targetButton?.focus();
+    } else if (column === 'notes') {
+        sidebarRef.current?.focusItem(activeNoteId ? 'note' : 'folder', activeNoteId);
+    } else if (column === 'editor') {
+        if (activeNote) {
+            editorTitleInputRef.current?.focus() || editorTextAreaRef.current?.focus();
+        } else {
+            editorRef.current?.focus();
+        }
+    }
   };
 
   useEffect(() => {
@@ -73,16 +165,14 @@ function App() {
 
       setIsLoading(true);
       try {
-        // Load folders for the selected notebook
         const notebookFolders = await dbService.getAllFolders(selectedNotebookId);
         setFolders(notebookFolders);
         
-        // Load notes for the selected notebook
         const notebookNotes = await dbService.getAllNotes(selectedNotebookId);
         setNotes(notebookNotes);
 
         const validOpenNoteIds = openNoteIds.filter(id => notebookNotes.some(n => n.id === id));
-        setOpenNoteIds(validOpenNoteIds);
+        setOpenNoteIds([...new Set(validOpenNoteIds)]);
 
         if (activeNoteId && !validOpenNoteIds.includes(activeNoteId)) {
             setActiveNoteId(validOpenNoteIds[0] || null);
@@ -121,7 +211,7 @@ function App() {
   const handleSelectNote = (note: Note) => {
       if (!note) return;
       if (!openNoteIds.includes(note.id)) {
-          setOpenNoteIds(prev => [...prev, note.id]);
+          setOpenNoteIds(prev => [...new Set([...prev, note.id])]);
       }
       setActiveNoteId(note.id);
   };
@@ -134,32 +224,6 @@ function App() {
           const remainingOpenIds = openNoteIds.filter(id => id !== noteIdToClose);
           setActiveNoteId(remainingOpenIds.find(id => id === nextActiveId) || remainingOpenIds[0] || null);
       }
-  };
-
-  const handleCreateNote = async () => {
-    if (!selectedNotebookId) {
-        showToast('Error', 'Please select a notebook first', 'destructive');
-        return;
-    }
-    try {
-      const newNote = await dbService.createNote({
-        notebookId: selectedNotebookId!,
-        title: 'Untitled',
-        content: '',
-        folderId: null
-      });
-
-      setNotes([newNote, ...notes]);
-      if (!openNoteIds.includes(newNote.id)) {
-         setOpenNoteIds(prev => [...prev, newNote.id]);
-      }
-      setActiveNoteId(newNote.id);
-
-      showToast('Success', 'New note created');
-    } catch (error) {
-      console.error('Failed to create note:', error);
-      showToast('Error', 'Failed to create note', 'destructive');
-    }
   };
 
   const handleUpdateNote = async (id: string, updates: Partial<Omit<Note, 'id' | 'createdAt' | 'updatedAt' | 'notebookId'>>) => {
@@ -217,10 +281,8 @@ function App() {
     try {
       await dbService.deleteFolder(folderId);
       
-      // Update local state
       setFolders(folders.filter(folder => folder.id !== folderId));
       
-      // Refresh notes as their folder associations may have changed
       if (selectedNotebookId) {
         const updatedNotes = await dbService.getAllNotes(selectedNotebookId);
         setNotes(updatedNotes);
@@ -247,6 +309,24 @@ function App() {
     }
   };
 
+  const handleMoveFolder = async (folderId: string, targetParentFolderId: string | null) => {
+    try {
+      const updatedFolder = await dbService.moveFolder(folderId, targetParentFolderId);
+      if (updatedFolder) {
+        setFolders(prevFolders => {
+          const otherFolders = prevFolders.filter(f => f.id !== folderId);
+          return [...otherFolders, updatedFolder].sort((a, b) => a.name.localeCompare(b.name));
+        });
+        showToast('Success', 'Folder moved successfully');
+      } else {
+        console.warn(`Move of folder ${folderId} to ${targetParentFolderId} was disallowed or failed.`);
+      }
+    } catch (error) {
+      console.error('Failed to move folder:', error);
+      showToast('Error', 'Failed to move folder', 'destructive');
+    }
+  };
+
   const handleMoveNoteToFolder = async (noteId: string, targetFolderId: string | null) => {
     try {
       const updatedNote = await dbService.moveNoteToFolder(noteId, targetFolderId);
@@ -261,7 +341,6 @@ function App() {
     }
   };
 
-  // Drag and drop handlers
   const handleDragStart = (noteId: string) => {
     setDraggedNoteId(noteId);
   };
@@ -276,7 +355,6 @@ function App() {
       await handleMoveNoteToFolder(draggedNoteId, dragOverFolderId);
     }
     
-    // Reset drag state
     setDraggedNoteId(null);
     setDragOverFolderId(null);
   };
@@ -300,14 +378,12 @@ function App() {
       console.log("App: XMTP Connected", { address });
       setXmtpClient(client);
       setUserAddress(address);
-      // Potentially trigger loading data associated with this XMTP identity
   };
 
   const handleXmtpDisconnect = () => {
       console.log("App: XMTP Disconnected");
       setXmtpClient(null);
       setUserAddress(null);
-      // Clear any XMTP-specific data
   };
 
   if (isDbBlocked) {
@@ -341,8 +417,12 @@ function App() {
       
       <main className="flex-1 overflow-hidden">
         <div className="flex h-full">
-          <div className="w-1/4 min-w-[200px] max-w-[300px] border-r flex flex-col">
+          <div
+            className="w-1/4 min-w-[200px] max-w-[300px] border-r flex flex-col"
+            onFocusCapture={() => setActiveColumn('notebooks')}
+          >
             <Sidebar
+              ref={sidebarRef}
               onXmtpConnect={handleXmtpConnect}
               onXmtpDisconnect={handleXmtpDisconnect}
               notebooks={notebooks}
@@ -359,11 +439,19 @@ function App() {
               onDeleteFolder={handleDeleteFolder}
               onUpdateFolder={handleUpdateFolder}
               onMoveNoteToFolder={handleMoveNoteToFolder}
+              onMoveFolder={handleMoveFolder}
               isLoading={isLoading}
+              containerRef={notesColumnRef}
+              editorTitleInputRef={editorTitleInputRef}
             />
           </div>
           
-          <div className="flex-1 flex flex-col">
+          <div 
+            className="flex-1 flex flex-col"
+            ref={editorRef}
+            tabIndex={0}
+            onFocus={() => setActiveColumn('editor')}
+          >
             {isLoading ? (
                 <div className="flex items-center justify-center h-full text-muted-foreground">
                     Loading...
@@ -381,6 +469,8 @@ function App() {
                         <Editor
                           note={activeNote}
                           onUpdateNote={handleUpdateNote}
+                          titleInputRef={editorTitleInputRef}
+                          textAreaRef={editorTextAreaRef}
                         />
                     </div>
                 </>

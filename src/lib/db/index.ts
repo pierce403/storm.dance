@@ -1,6 +1,6 @@
-import { openDB, DBSchema, IDBPDatabase, StoreValue, IndexKey } from 'idb';
+import { openDB, deleteDB, IDBPDatabase, DBSchema } from 'idb';
 
-// --- Interfaces ---
+// --- Interface Definitions ---
 
 export interface Notebook {
   id: string;
@@ -13,7 +13,7 @@ export interface Folder {
   id: string;
   notebookId: string;
   name: string;
-  parentFolderId: string | null; // null means root level folder
+  parentFolderId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -21,7 +21,7 @@ export interface Folder {
 export interface Note {
   id: string;
   notebookId: string;
-  folderId: string | null; // null means not in a folder (root level)
+  folderId: string | null;
   title: string;
   content: string;
   createdAt: number;
@@ -34,9 +34,7 @@ interface StormDanceDB extends DBSchema {
   notebooks: {
     key: string;
     value: Notebook;
-    indexes: {
-      'by-updated': number;
-    };
+    indexes: { 'by-updated': number };
   };
   folders: {
     key: string;
@@ -44,7 +42,7 @@ interface StormDanceDB extends DBSchema {
     indexes: {
       'by-updated': number;
       'by-notebook': string;
-      'by-parent-folder': string | null;
+      'by-parent-folder': string; // Index non-null parent IDs
     };
   };
   notes: {
@@ -53,254 +51,243 @@ interface StormDanceDB extends DBSchema {
     indexes: {
       'by-updated': number;
       'by-notebook-updated': [string, number];
-      'by-folder': string | null;
+      'by-folder': string; // Index non-null folder IDs
     };
   };
 }
 
 export const DB_NAME = 'storm-dance-db';
-const DB_VERSION = 3; // Increment version for schema updates
+const DB_VERSION = 3;
 
-const initDB = async (): Promise<IDBPDatabase<StormDanceDB>> => {
-  return openDB<StormDanceDB>(DB_NAME, DB_VERSION, {
+// Use type alias for store names
+type StoreName = keyof StormDanceDB;
+
+let dbPromise: Promise<IDBPDatabase<StormDanceDB>> | null = null;
+
+const initDB = (): Promise<IDBPDatabase<StormDanceDB>> => {
+  if (dbPromise) {
+    return dbPromise;
+  }
+  dbPromise = openDB<StormDanceDB>(DB_NAME, DB_VERSION, {
     upgrade(db, oldVersion, newVersion, tx) {
       console.log(`Upgrading DB from version ${oldVersion} to ${newVersion ?? DB_VERSION}`);
 
-      // Create notebooks store if it doesn't exist
+      // Notebooks Store
       if (!db.objectStoreNames.contains('notebooks')) {
         const notebooksStore = db.createObjectStore('notebooks', { keyPath: 'id' });
         notebooksStore.createIndex('by-updated', 'updatedAt');
-        console.log("Created 'notebooks' object store");
       }
 
-      // Create folders store if it doesn't exist
+      // Folders Store
       if (!db.objectStoreNames.contains('folders')) {
         const foldersStore = db.createObjectStore('folders', { keyPath: 'id' });
         foldersStore.createIndex('by-updated', 'updatedAt');
         foldersStore.createIndex('by-notebook', 'notebookId');
         foldersStore.createIndex('by-parent-folder', 'parentFolderId');
-        console.log("Created 'folders' object store with indexes");
+      } else if (oldVersion < 3 && tx.objectStore('folders').indexNames.contains('by-parent-folder') === false) {
+          tx.objectStore('folders').createIndex('by-parent-folder', 'parentFolderId');
       }
 
-      // Update notes store
-      if (db.objectStoreNames.contains('notes')) {
-        const notesStore = tx.objectStore('notes');
-        
-        // Add index for by-notebook-updated if needed
-        if (oldVersion < 2 && !notesStore.indexNames.contains('by-notebook-updated')) {
-          notesStore.createIndex('by-notebook-updated', ['notebookId', 'updatedAt']);
-          console.log("Created 'by-notebook-updated' index on 'notes'");
-        }
-        
-        // Add index for folders if needed
-        if (oldVersion < 3 && !notesStore.indexNames.contains('by-folder')) {
-          notesStore.createIndex('by-folder', 'folderId');
-          console.log("Created 'by-folder' index on 'notes'");
-          
-          // Migrate existing notes to have folderId = null
-          const notesCursor = tx.objectStore('notes').openCursor();
-          notesCursor.then(function processNotes(cursor): Promise<void> | undefined {
-            if (!cursor) return;
-            
-            const note = cursor.value as Note;
-            if (!('folderId' in note)) {
-              note.folderId = null;
-              cursor.update(note);
-            }
-            
-            return cursor.continue().then(processNotes);
-          });
-        }
-      } else {
-        // Create notes store if it doesn't exist
+      // Notes Store
+      if (!db.objectStoreNames.contains('notes')) {
         const notesStore = db.createObjectStore('notes', { keyPath: 'id' });
         notesStore.createIndex('by-updated', 'updatedAt');
         notesStore.createIndex('by-notebook-updated', ['notebookId', 'updatedAt']);
         notesStore.createIndex('by-folder', 'folderId');
-        console.log("Created 'notes' object store with indexes");
+      } else {
+          const notesStore = tx.objectStore('notes');
+          // V2 migration
+          if (oldVersion < 2 && !notesStore.indexNames.contains('by-notebook-updated')) {
+              notesStore.createIndex('by-notebook-updated', ['notebookId', 'updatedAt']);
+          }
+          // V3 migration
+          if (oldVersion < 3) {
+              if (!notesStore.indexNames.contains('by-folder')) {
+                  notesStore.createIndex('by-folder', 'folderId');
+              }
+              // Migrate data
+              console.log("V3 Migration: Ensuring 'folderId' property...");
+              (async () => {
+                  let cursor = await notesStore.openCursor();
+                  while (cursor) {
+                      const value = cursor.value;
+                      // Check if folderId is missing
+                      if (value.folderId === undefined) {
+                           await cursor.update({ ...value, folderId: null });
+                      }
+                      cursor = await cursor.continue();
+                  }
+                  console.log("V3 Migration: 'folderId' check complete.");
+              })();
+          }
       }
     },
     blocked() {
-      console.error("Database upgrade blocked. Please close other tabs running this application.");
+      console.error('IndexedDB connection blocked. Please close other tabs running this application.');
+      // Optional: Display a message to the user in the UI
+      alert('Database update blocked. Please close other tabs running this application and reload.');
     },
     blocking() {
-      console.warn("Database upgrade is blocking other tabs.");
+      console.warn('IndexedDB connection is blocking other instances.');
+      // Could potentially close the DB connection gracefully here if needed
     },
+    terminated() {
+      console.error('IndexedDB connection terminated unexpectedly. Reloading might be necessary.');
+    }
   });
+  return dbPromise;
 };
 
-export type CreateNoteInput = Omit<Note, 'id' | 'createdAt' | 'updatedAt'>;
+// --- Service Object ---
+
+export type CreateNotebookInput = Omit<Notebook, 'id' | 'createdAt' | 'updatedAt'>;
 export type CreateFolderInput = Omit<Folder, 'id' | 'createdAt' | 'updatedAt'>;
+export type CreateNoteInput = Omit<Note, 'id' | 'createdAt' | 'updatedAt'>;
 
 export const dbService = {
+  getDb: initDB,
 
-  async getAllNotebooks(): Promise<Notebook[]> {
-    const db = await initDB();
-    return db.getAllFromIndex('notebooks', 'by-updated').then(notebooks => notebooks.reverse());
+  async _ensureDefaultNotebook(): Promise<Notebook> {
+    const db = await this.getDb();
+    const allNotebooks = await db.getAll('notebooks');
+    if (allNotebooks.length > 0) {
+      return allNotebooks.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    }
+    return this.createNotebook({ name: 'My Notebook' });
   },
 
-  async createNotebook(notebookInput: Omit<Notebook, 'id' | 'createdAt' | 'updatedAt'>): Promise<Notebook> {
-    const db = await initDB();
+  async getAllNotebooks(): Promise<Notebook[]> {
+    const db = await this.getDb();
+    return db.getAllFromIndex('notebooks', 'by-updated').then(nbs => nbs.reverse());
+  },
+
+  async createNotebook(notebookInput: CreateNotebookInput): Promise<Notebook> {
+    const db = await this.getDb();
     const timestamp = Date.now();
-    const newNotebook: Notebook = {
-      id: crypto.randomUUID(),
-      ...notebookInput,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
+    const newNotebook: Notebook = { id: crypto.randomUUID(), ...notebookInput, createdAt: timestamp, updatedAt: timestamp };
     await db.put('notebooks', newNotebook);
     return newNotebook;
   },
 
-  async _ensureDefaultNotebook(): Promise<Notebook> {
-    const notebooks = await this.getAllNotebooks();
-    if (notebooks.length > 0) {
-      return notebooks[0];
-    } else {
-      console.log("No notebooks found, creating default notebook.");
-      return this.createNotebook({ name: "My Notebook" });
-    }
-  },
-
-  // Folder operations
+  // --- Folder operations ---
   async getAllFolders(notebookId: string): Promise<Folder[]> {
-    const db = await initDB();
-    return db.getAllFromIndex('folders', 'by-notebook', notebookId);
+    const db = await this.getDb();
+    const folders = await db.getAllFromIndex('folders', 'by-notebook', notebookId);
+    // Filter for root folders (parentFolderId is null) AFTER getting from DB
+    // const rootFolders = folders.filter(f => f.parentFolderId === null);
+    // Or return all and let UI handle hierarchy
+    return folders.sort((a, b) => a.name.localeCompare(b.name));
   },
 
   async createFolder(folderInput: CreateFolderInput): Promise<Folder> {
-    const db = await initDB();
+    const db = await this.getDb();
     const timestamp = Date.now();
     const newFolder: Folder = {
       id: crypto.randomUUID(),
       ...folderInput,
+      parentFolderId: folderInput.parentFolderId || null,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
+    if (!newFolder.notebookId) throw new Error("Folder must have notebookId");
     await db.put('folders', newFolder);
     return newFolder;
   },
 
   async updateFolder(id: string, updates: Partial<Omit<Folder, 'id' | 'createdAt' | 'updatedAt' | 'notebookId'>>): Promise<Folder | undefined> {
-    const db = await initDB();
+    const db = await this.getDb();
     const folder = await db.get('folders', id);
-    
     if (!folder) return undefined;
-    
-    const updatedFolder: Folder = {
-      ...folder,
-      ...updates,
-      updatedAt: Date.now(),
-    };
-    
+    const updatedFolder: Folder = { ...folder, ...updates, updatedAt: Date.now() };
     await db.put('folders', updatedFolder);
     return updatedFolder;
   },
 
   async deleteFolder(id: string): Promise<boolean> {
-    const db = await initDB();
-    
-    // Get notes in this folder
-    const notes = await db.getAllFromIndex('notes', 'by-folder', id);
-    
-    // Get subfolders
-    const subfolders = await db.getAllFromIndex('folders', 'by-parent-folder', id);
-    
-    // Transaction to delete everything
+    const db = await this.getDb();
+    const folderToDelete = await db.get('folders', id);
+    if (!folderToDelete) return false;
+    const targetParentId = folderToDelete.parentFolderId;
     const tx = db.transaction(['folders', 'notes'], 'readwrite');
-    
-    // Move notes to parent folder or null
-    const folder = await db.get('folders', id);
-    const parentFolderId = folder?.parentFolderId;
-    
-    // Update each note to new parent
-    for (const note of notes) {
-      note.folderId = parentFolderId ?? null;
-      note.updatedAt = Date.now();
-      await tx.objectStore('notes').put(note);
+    const foldersStore = tx.objectStore('folders');
+    const notesStore = tx.objectStore('notes');
+
+    // Re-parent notes
+    let notesCursor = await notesStore.index('by-folder').openCursor(IDBKeyRange.only(id));
+    while(notesCursor) {
+      await notesCursor.update({ ...notesCursor.value, folderId: targetParentId, updatedAt: Date.now() });
+      notesCursor = await notesCursor.continue();
     }
-    
-    // Move subfolders to parent
-    for (const subfolder of subfolders) {
-      subfolder.parentFolderId = parentFolderId ?? null;
-      subfolder.updatedAt = Date.now();
-      await tx.objectStore('folders').put(subfolder);
+    // Re-parent subfolders
+    let subfoldersCursor = await foldersStore.index('by-parent-folder').openCursor(IDBKeyRange.only(id));
+    while(subfoldersCursor) {
+      await subfoldersCursor.update({ ...subfoldersCursor.value, parentFolderId: targetParentId, updatedAt: Date.now() });
+      subfoldersCursor = await subfoldersCursor.continue();
     }
-    
     // Delete the folder
-    await tx.objectStore('folders').delete(id);
+    await foldersStore.delete(id);
     await tx.done;
-    
     return true;
   },
 
-  // Note operations
-  async getAllNotes(notebookId?: string, folderId?: string | null): Promise<Note[]> {
-    const db = await initDB();
-    
-    if (notebookId && folderId !== undefined) {
-      // Get notes by folder
-      return db.getAllFromIndex('notes', 'by-folder', folderId)
-        .then(notes => notes
-          .filter(note => note.notebookId === notebookId)
-          .sort((a, b) => b.updatedAt - a.updatedAt)
-        );
-    } else if (notebookId) {
-      // Get all notes in notebook
-      const index = db.transaction('notes').objectStore('notes').index('by-notebook-updated');
-      const range = IDBKeyRange.bound([notebookId, -Infinity], [notebookId, Infinity]);
-      return index.getAll(range).then(notes => notes.reverse());
-    } else {
-      console.warn("getAllNotes called without notebookId, returning all notes.");
-      return db.getAllFromIndex('notes', 'by-updated').then(notes => notes.reverse());
+  async moveFolder(folderId: string, targetParentFolderId: string | null): Promise<Folder | undefined> {
+    const db = await this.getDb();
+    const folderToMove = await db.get('folders', folderId);
+    if (!folderToMove) return undefined;
+    const targetId = targetParentFolderId || null;
+    if (folderId === targetId) return folderToMove;
+
+    // Check for cyclical move
+    let currentParentId = targetId;
+    while (currentParentId !== null) {
+      if (currentParentId === folderId) return folderToMove;
+      const parentFolder = await db.get('folders', currentParentId);
+      if (!parentFolder) break;
+      currentParentId = parentFolder.parentFolderId;
     }
+
+    if (folderToMove.parentFolderId !== targetId) {
+      const updatedFolder: Folder = { ...folderToMove, parentFolderId: targetId, updatedAt: Date.now() };
+      await db.put('folders', updatedFolder);
+      return updatedFolder;
+    }
+    return folderToMove;
   },
 
-  async getNote(id: string): Promise<Note | undefined> {
-    const db = await initDB();
-    return db.get('notes', id);
+  // --- Note operations ---
+  async getAllNotes(notebookId: string): Promise<Note[]> {
+    const db = await this.getDb();
+    const index = db.transaction('notes').objectStore('notes').index('by-notebook-updated');
+    const range = IDBKeyRange.bound([notebookId, -Infinity], [notebookId, Infinity]);
+    return index.getAll(range).then(notes => notes.reverse());
   },
 
   async createNote(noteInput: CreateNoteInput): Promise<Note> {
-    const db = await initDB();
+    const db = await this.getDb();
     const timestamp = Date.now();
-    const newNote: Note = {
-      id: crypto.randomUUID(),
-      ...noteInput,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      folderId: noteInput.folderId ?? null,
-    };
-    if (!newNote.notebookId) {
-      throw new Error("Cannot create note without a notebookId");
-    }
+    const newNote: Note = { id: crypto.randomUUID(), ...noteInput, folderId: noteInput.folderId ?? null, createdAt: timestamp, updatedAt: timestamp };
+    if (!newNote.notebookId) throw new Error("Note must have notebookId");
     await db.put('notes', newNote);
     return newNote;
   },
 
   async updateNote(id: string, updates: Partial<Omit<Note, 'id' | 'createdAt' | 'updatedAt' | 'notebookId'>>): Promise<Note | undefined> {
-    const db = await initDB();
+    const db = await this.getDb();
     const note = await db.get('notes', id);
-    
     if (!note) return undefined;
-    
-    const updatedNote: Note = {
-      ...note,
-      ...updates,
-      updatedAt: Date.now(),
-    };
-    
+    const updatedNote: Note = { ...note, ...updates, updatedAt: Date.now() };
     await db.put('notes', updatedNote);
     return updatedNote;
   },
 
-  async moveNoteToFolder(noteId: string, folderId: string | null): Promise<Note | undefined> {
-    return this.updateNote(noteId, { folderId });
-  },
-
   async deleteNote(id: string): Promise<boolean> {
-    const db = await initDB();
+    const db = await this.getDb();
     await db.delete('notes', id);
     return true;
+  },
+
+  async moveNoteToFolder(noteId: string, folderId: string | null): Promise<Note | undefined> {
+    const targetFolderId = folderId || null;
+    return this.updateNote(noteId, { folderId: targetFolderId });
   },
 };
