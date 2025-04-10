@@ -22,8 +22,8 @@ interface XmtpConnectProps {
 type Status = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 export function XmtpConnect({ onConnect, onDisconnect }: XmtpConnectProps) {
-  const [signer, setSigner] = useState<ethers.Signer | null>(null);
-  const [client, setClient] = useState<Client | null>(null);
+  const [_signer, setSigner] = useState<ethers.Signer | null>(null);
+  const [_client, setClient] = useState<Client | null>(null);
   const [status, setStatus] = useState<Status>('disconnected');
   const [address, setAddress] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);

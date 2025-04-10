@@ -12,8 +12,8 @@ function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [openNoteIds, setOpenNoteIds] = useState<string[]>([]);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
-  const [xmtpClient, setXmtpClient] = useState<Client | null>(null);
-  const [userAddress, setUserAddress] = useState<string | null>(null);
+  const [_xmtpClient, setXmtpClient] = useState<Client | null>(null);
+  const [_userAddress, setUserAddress] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isDbBlocked, setIsDbBlocked] = useState(false);
   const [toastMessage, setToastMessage] = useState<{title: string, description: string, variant?: 'default' | 'destructive'} | null>(null);
