@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Sidebar } from './components/notes/Sidebar';
 import { Editor } from './components/notes/Editor';
+import { EditorTabs } from './components/notes/EditorTabs';
 import { Note, Notebook, dbService, DB_NAME } from './lib/db';
 import './App.css';
 
@@ -8,10 +9,17 @@ function App() {
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
   const [selectedNotebookId, setSelectedNotebookId] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
-  const [selectedNote, setSelectedNote] = useState<Note | null>(null);
+  const [openNoteIds, setOpenNoteIds] = useState<string[]>([]);
+  const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isDbBlocked, setIsDbBlocked] = useState(false);
   const [toastMessage, setToastMessage] = useState<{title: string, description: string, variant?: 'default' | 'destructive'} | null>(null);
+
+  const getNoteById = (id: string | null): Note | null => {
+      if (!id) return null;
+      return notes.find(note => note.id === id) || null;
+  }
+  const activeNote = getNoteById(activeNoteId);
 
   const showToast = (title: string, description: string, variant: 'default' | 'destructive' = 'default') => {
     setToastMessage({ title, description, variant });
@@ -50,7 +58,8 @@ function App() {
     const loadNotes = async () => {
       if (!selectedNotebookId) {
           setNotes([]);
-          setSelectedNote(null);
+          setOpenNoteIds([]);
+          setActiveNoteId(null);
           setIsLoading(false);
           return;
       }
@@ -60,21 +69,21 @@ function App() {
         const notebookNotes = await dbService.getAllNotes(selectedNotebookId);
         setNotes(notebookNotes);
 
-        const currentSelectedNoteExists = notebookNotes.some(n => n.id === selectedNote?.id);
+        const validOpenNoteIds = openNoteIds.filter(id => notebookNotes.some(n => n.id === id));
+        setOpenNoteIds(validOpenNoteIds);
 
-        if (selectedNote && !currentSelectedNoteExists) {
-           setSelectedNote(null);
-        } else if (!selectedNote && notebookNotes.length > 0) {
-          setSelectedNote(notebookNotes[0]);
-        } else if (notebookNotes.length === 0) {
-            setSelectedNote(null);
+        if (activeNoteId && !validOpenNoteIds.includes(activeNoteId)) {
+            setActiveNoteId(validOpenNoteIds[0] || null);
+        } else if (!activeNoteId && validOpenNoteIds.length > 0) {
+            setActiveNoteId(validOpenNoteIds[0]);
         }
 
       } catch (error) {
         console.error('Failed to load notes for notebook:', error);
         showToast('Error', 'Failed to load notes', 'destructive');
         setNotes([]);
-        setSelectedNote(null);
+        setOpenNoteIds([]);
+        setActiveNoteId(null);
       } finally {
         setIsLoading(false);
       }
@@ -97,6 +106,24 @@ function App() {
       }
   }
 
+  const handleSelectNote = (note: Note) => {
+      if (!note) return;
+      if (!openNoteIds.includes(note.id)) {
+          setOpenNoteIds(prev => [...prev, note.id]);
+      }
+      setActiveNoteId(note.id);
+  };
+
+  const handleCloseTab = (noteIdToClose: string) => {
+      setOpenNoteIds(prev => prev.filter(id => id !== noteIdToClose));
+      if (activeNoteId === noteIdToClose) {
+          const currentIndex = openNoteIds.indexOf(noteIdToClose);
+          const nextActiveId = openNoteIds[currentIndex - 1] || openNoteIds[currentIndex + 1] || null;
+          const remainingOpenIds = openNoteIds.filter(id => id !== noteIdToClose);
+          setActiveNoteId(remainingOpenIds.find(id => id === nextActiveId) || remainingOpenIds[0] || null);
+      }
+  };
+
   const handleCreateNote = async () => {
     if (!selectedNotebookId) {
         showToast('Error', 'Please select a notebook first', 'destructive');
@@ -104,13 +131,16 @@ function App() {
     }
     try {
       const newNote = await dbService.createNote({
-        notebookId: selectedNotebookId,
+        notebookId: selectedNotebookId!,
         title: 'Untitled',
         content: '',
       });
 
       setNotes([newNote, ...notes]);
-      setSelectedNote(newNote);
+      if (!openNoteIds.includes(newNote.id)) {
+         setOpenNoteIds(prev => [...prev, newNote.id]);
+      }
+      setActiveNoteId(newNote.id);
 
       showToast('Success', 'New note created');
     } catch (error) {
@@ -125,10 +155,6 @@ function App() {
 
       if (updatedNote) {
         setNotes(notes.map(note => note.id === id ? updatedNote : note));
-
-        if (selectedNote && selectedNote.id === id) {
-          setSelectedNote(updatedNote);
-        }
       }
     } catch (error) {
       console.error('Failed to update note:', error);
@@ -143,10 +169,8 @@ function App() {
       const updatedNotes = notes.filter(note => note.id !== id);
       setNotes(updatedNotes);
 
-      if (selectedNote && selectedNote.id === id) {
-        const oldIndex = notes.findIndex(note => note.id === id);
-        const newSelectedNote = updatedNotes[oldIndex] || updatedNotes[oldIndex - 1] || (updatedNotes.length > 0 ? updatedNotes[0] : null);
-        setSelectedNote(newSelectedNote);
+      if (openNoteIds.includes(id)) {
+          handleCloseTab(id);
       }
 
       showToast('Success', 'Note deleted');
@@ -207,26 +231,41 @@ function App() {
               notebooks={notebooks}
               selectedNotebookId={selectedNotebookId}
               notes={notes}
-              selectedNoteId={selectedNote?.id || null}
+              selectedNoteId={activeNoteId}
               onSelectNotebook={setSelectedNotebookId}
               onCreateNotebook={handleCreateNotebook}
-              onSelectNote={setSelectedNote}
+              onSelectNote={handleSelectNote}
               onCreateNote={handleCreateNote}
               onDeleteNote={handleDeleteNote}
               isLoading={isLoading}
             />
           </div>
           
-          <div className="flex-1">
+          <div className="flex-1 flex flex-col">
             {isLoading ? (
                 <div className="flex items-center justify-center h-full text-muted-foreground">
                     Loading...
                 </div>
+            ) : openNoteIds.length > 0 ? (
+                <>
+                    <EditorTabs 
+                        notes={notes}
+                        openNoteIds={openNoteIds}
+                        activeNoteId={activeNoteId}
+                        onSelectTab={setActiveNoteId}
+                        onCloseTab={handleCloseTab}
+                    />
+                    <div className="flex-1 overflow-auto">
+                        <Editor
+                          note={activeNote}
+                          onUpdateNote={handleUpdateNote}
+                        />
+                    </div>
+                </>
             ) : (
-                <Editor
-                  note={selectedNote}
-                  onUpdateNote={handleUpdateNote}
-                />
+                 <div className="flex items-center justify-center h-full text-muted-foreground">
+                    Select a note to open it.
+                </div>
             )}
           </div>
         </div>
