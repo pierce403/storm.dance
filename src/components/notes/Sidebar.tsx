@@ -1,8 +1,12 @@
 import { useState } from 'react';
 import { Plus, Trash2, Book, Loader2 } from 'lucide-react';
 import { Note, Notebook } from '../../lib/db';
+import { XmtpConnect } from '../xmtp/XmtpConnect';
+import { Client } from '@xmtp/xmtp-js';
 
 interface SidebarProps {
+  onXmtpConnect: (client: Client, address: string) => void;
+  onXmtpDisconnect: () => void;
   notebooks: Notebook[];
   selectedNotebookId: string | null;
   notes: Note[];
@@ -16,6 +20,8 @@ interface SidebarProps {
 }
 
 export function Sidebar({
+  onXmtpConnect,
+  onXmtpDisconnect,
   notebooks,
   selectedNotebookId,
   notes,
@@ -43,6 +49,10 @@ export function Sidebar({
 
   return (
     <div className="flex flex-col h-full">
+      <XmtpConnect 
+          onConnect={onXmtpConnect}
+          onDisconnect={onXmtpDisconnect}
+      />
       <div className="p-4 border-b">
          <h2 className="text-lg font-semibold mb-2 flex items-center">
              <Book className="h-5 w-5 mr-2" /> Notebooks

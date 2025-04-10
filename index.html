@@ -5,6 +5,16 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>storm.dance</title>
+    <!-- Load environment initialization script first -->
+    <script src="/env-init.js"></script>
+    <!-- Load specific Buffer polyfill -->
+    <script src="/buffer-polyfill.js"></script>
+    <!-- Global polyfills for Node.js modules -->
+    <script>
+      window.process = window.process || { env: {} };
+      window.global = window;
+      window.Buffer = window.Buffer || [];
+    </script>
   </head>
   <body>
     <div id="root"></div>

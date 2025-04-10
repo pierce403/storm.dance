@@ -3,6 +3,7 @@ import { Sidebar } from './components/notes/Sidebar';
 import { Editor } from './components/notes/Editor';
 import { EditorTabs } from './components/notes/EditorTabs';
 import { Note, Notebook, dbService, DB_NAME } from './lib/db';
+import { Client } from '@xmtp/xmtp-js';
 import './App.css';
 
 function App() {
@@ -11,6 +12,8 @@ function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [openNoteIds, setOpenNoteIds] = useState<string[]>([]);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
+  const [xmtpClient, setXmtpClient] = useState<Client | null>(null);
+  const [userAddress, setUserAddress] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isDbBlocked, setIsDbBlocked] = useState(false);
   const [toastMessage, setToastMessage] = useState<{title: string, description: string, variant?: 'default' | 'destructive'} | null>(null);
@@ -195,6 +198,20 @@ function App() {
     }
   };
 
+  const handleXmtpConnect = (client: Client, address: string) => {
+      console.log("App: XMTP Connected", { address });
+      setXmtpClient(client);
+      setUserAddress(address);
+      // Potentially trigger loading data associated with this XMTP identity
+  };
+
+  const handleXmtpDisconnect = () => {
+      console.log("App: XMTP Disconnected");
+      setXmtpClient(null);
+      setUserAddress(null);
+      // Clear any XMTP-specific data
+  };
+
   if (isDbBlocked) {
     return (
       <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
@@ -226,8 +243,10 @@ function App() {
       
       <main className="flex-1 overflow-hidden">
         <div className="flex h-full">
-          <div className="w-1/4 min-w-[200px] max-w-[300px] border-r">
+          <div className="w-1/4 min-w-[200px] max-w-[300px] border-r flex flex-col">
             <Sidebar
+              onXmtpConnect={handleXmtpConnect}
+              onXmtpDisconnect={handleXmtpDisconnect}
               notebooks={notebooks}
               selectedNotebookId={selectedNotebookId}
               notes={notes}
