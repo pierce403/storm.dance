@@ -188,20 +188,6 @@ function App() {
     loadNotes();
   }, [selectedNotebookId]);
 
-  const handleCreateNotebook = async (name: string): Promise<Notebook | null> => {
-      try {
-          const newNotebook = await dbService.createNotebook({ name });
-          setNotebooks([newNotebook, ...notebooks]);
-          setSelectedNotebookId(newNotebook.id);
-          showToast('Success', `Notebook '${name}' created`);
-          return newNotebook;
-      } catch (error) {
-          console.error('Failed to create notebook:', error);
-          showToast('Error', 'Failed to create notebook', 'destructive');
-          return null;
-      }
-  }
-
   const handleSelectNote = (note: Note) => {
       if (!note) return;
       if (!openNoteIds.includes(note.id)) {
