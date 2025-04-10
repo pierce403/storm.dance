@@ -40,3 +40,39 @@
 .read-the-docs {
   color: #888;
 }
+
+/* Add CSS for drag and drop */
+.draggable-note {
+  cursor: grab;
+}
+
+.draggable-note:active {
+  cursor: grabbing;
+}
+
+.drag-over {
+  background-color: rgba(59, 130, 246, 0.2);
+  border-radius: 0.375rem;
+}
+
+/* Folder editing styles */
+.folder-edit-form {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+}
+
+.folder-edit-input {
+  flex: 1;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  outline: none;
+}
+
+.folder-edit-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3);
+}

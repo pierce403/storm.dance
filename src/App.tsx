@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/notes/Sidebar';
 import { Editor } from './components/notes/Editor';
 import { EditorTabs } from './components/notes/EditorTabs';
-import { Note, Notebook, dbService, DB_NAME } from './lib/db';
+import { Note, Notebook, Folder, dbService, DB_NAME } from './lib/db';
 import { Client } from '@xmtp/xmtp-js';
 import './App.css';
 
@@ -10,6 +10,7 @@ function App() {
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
   const [selectedNotebookId, setSelectedNotebookId] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
   const [openNoteIds, setOpenNoteIds] = useState<string[]>([]);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
   const [_xmtpClient, setXmtpClient] = useState<Client | null>(null);
@@ -17,6 +18,8 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isDbBlocked, setIsDbBlocked] = useState(false);
   const [toastMessage, setToastMessage] = useState<{title: string, description: string, variant?: 'default' | 'destructive'} | null>(null);
+  const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
 
   const getNoteById = (id: string | null): Note | null => {
       if (!id) return null;
@@ -63,12 +66,18 @@ function App() {
           setNotes([]);
           setOpenNoteIds([]);
           setActiveNoteId(null);
+          setFolders([]);
           setIsLoading(false);
           return;
       }
 
       setIsLoading(true);
       try {
+        // Load folders for the selected notebook
+        const notebookFolders = await dbService.getAllFolders(selectedNotebookId);
+        setFolders(notebookFolders);
+        
+        // Load notes for the selected notebook
         const notebookNotes = await dbService.getAllNotes(selectedNotebookId);
         setNotes(notebookNotes);
 
@@ -137,6 +146,7 @@ function App() {
         notebookId: selectedNotebookId!,
         title: 'Untitled',
         content: '',
+        folderId: null
       });
 
       setNotes([newNote, ...notes]);
@@ -183,6 +193,94 @@ function App() {
     }
   };
 
+  const handleCreateFolder = async (name: string, parentFolderId: string | null) => {
+    if (!selectedNotebookId) {
+        showToast('Error', 'Please select a notebook first', 'destructive');
+        return;
+    }
+    try {
+      const newFolder = await dbService.createFolder({
+        notebookId: selectedNotebookId!,
+        name,
+        parentFolderId,
+      });
+
+      setFolders([...folders, newFolder]);
+      showToast('Success', 'New folder created');
+    } catch (error) {
+      console.error('Failed to create folder:', error);
+      showToast('Error', 'Failed to create folder', 'destructive');
+    }
+  };
+
+  const handleDeleteFolder = async (folderId: string) => {
+    try {
+      await dbService.deleteFolder(folderId);
+      
+      // Update local state
+      setFolders(folders.filter(folder => folder.id !== folderId));
+      
+      // Refresh notes as their folder associations may have changed
+      if (selectedNotebookId) {
+        const updatedNotes = await dbService.getAllNotes(selectedNotebookId);
+        setNotes(updatedNotes);
+      }
+      
+      showToast('Success', 'Folder deleted');
+    } catch (error) {
+      console.error('Failed to delete folder:', error);
+      showToast('Error', 'Failed to delete folder', 'destructive');
+    }
+  };
+
+  const handleUpdateFolder = async (folderId: string, updates: Partial<Omit<Folder, 'id' | 'createdAt' | 'updatedAt' | 'notebookId'>>) => {
+    try {
+      const updatedFolder = await dbService.updateFolder(folderId, updates);
+      
+      if (updatedFolder) {
+        setFolders(folders.map(folder => folder.id === folderId ? updatedFolder : folder));
+        showToast('Success', 'Folder updated');
+      }
+    } catch (error) {
+      console.error('Failed to update folder:', error);
+      showToast('Error', 'Failed to update folder', 'destructive');
+    }
+  };
+
+  const handleMoveNoteToFolder = async (noteId: string, targetFolderId: string | null) => {
+    try {
+      const updatedNote = await dbService.moveNoteToFolder(noteId, targetFolderId);
+      
+      if (updatedNote) {
+        setNotes(notes.map(note => note.id === noteId ? updatedNote : note));
+        showToast('Success', 'Note moved successfully');
+      }
+    } catch (error) {
+      console.error('Failed to move note:', error);
+      showToast('Error', 'Failed to move note', 'destructive');
+    }
+  };
+
+  // Drag and drop handlers
+  const handleDragStart = (noteId: string) => {
+    setDraggedNoteId(noteId);
+  };
+
+  const handleDragOver = (folderId: string | null, e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverFolderId(folderId);
+  };
+
+  const handleDragEnd = async () => {
+    if (draggedNoteId && dragOverFolderId !== undefined) {
+      await handleMoveNoteToFolder(draggedNoteId, dragOverFolderId);
+    }
+    
+    // Reset drag state
+    setDraggedNoteId(null);
+    setDragOverFolderId(null);
+  };
+  
   const handleClearStorage = async () => {
     console.log(`Attempting to delete IndexedDB database: ${DB_NAME}`);
     try {
@@ -250,12 +348,17 @@ function App() {
               notebooks={notebooks}
               selectedNotebookId={selectedNotebookId}
               notes={notes}
+              folders={folders}
               selectedNoteId={activeNoteId}
               onSelectNotebook={setSelectedNotebookId}
               onCreateNotebook={handleCreateNotebook}
               onSelectNote={handleSelectNote}
               onCreateNote={handleCreateNote}
               onDeleteNote={handleDeleteNote}
+              onCreateFolder={handleCreateFolder}
+              onDeleteFolder={handleDeleteFolder}
+              onUpdateFolder={handleUpdateFolder}
+              onMoveNoteToFolder={handleMoveNoteToFolder}
               isLoading={isLoading}
             />
           </div>
