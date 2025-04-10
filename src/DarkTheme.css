@@ -1,0 +1,310 @@
+/* Dark Theme Variables */
+:root {
+  /* Light mode default variables */
+  --bg-main: #f1f2f3;        /* Light grey main background */
+  --bg-sidebar: #e4e5e7;     /* Slightly darker grey for sidebar */
+  --bg-sidebar-item: #e4e5e7; /* Match sidebar */
+  --bg-tree-view: #eff0f2;   /* Very light grey for tree view */
+  --bg-header: #e4e5e7;      /* Match sidebar */
+  --bg-editor: #f7f8f9;      /* Almost white for editor area */
+  --bg-tabs: #e9eaec;        /* Tabs background */
+  
+  --text-primary: #18181b;   /* Almost black - for high contrast */
+  --text-secondary: #2d2d30; /* Dark grey - secondary text */
+  --text-muted: #52525b;     /* Medium grey for subtle text */
+  
+  --border-color: rgba(234, 179, 8, 0.3); /* Subtle yellow border */
+  
+  --accent-color: #ca8a04;   /* Yellow gold - primary accent */
+  --accent-hover: #a16207;   /* Darker yellow for hover */
+  --accent-light: rgba(234, 179, 8, 0.2); /* Transparent yellow for highlights */
+  
+  --shadow-color: rgba(0, 0, 0, 0.1);
+  
+  /* Transitions for theme switching */
+  --transition-speed: 0.3s;
+}
+
+/* Dark mode variables */
+[data-theme="dark"] {
+  /* Dark theme colors */
+  --bg-main: #18181b;        /* Almost black - main background */
+  --bg-sidebar: #27272a;     /* Dark gray - sidebar container */
+  --bg-sidebar-item: #27272a; /* Same as sidebar for consistency */
+  --bg-tree-view: #1f1f23;   /* Slightly lighter than main - tree view area */
+  --bg-header: #2d2d32;      /* Dark header */
+  --bg-editor: #121214;      /* Very dark - editor area */
+  --bg-tabs: #27272a;        /* Matches sidebar */
+  
+  --text-primary: #f9fafb;   /* Almost white - primary text */
+  --text-secondary: #d1d5db; /* Light gray - less important text */
+  --text-muted: #9ca3af;     /* Medium gray - subdued text */
+  
+  --border-color: rgba(250, 204, 21, 0.2); /* Subtle yellow border */
+  
+  --accent-color: #facc15;   /* Yellow - primary accent */
+  --accent-hover: #eab308;   /* Slightly darker yellow for hover */
+  --accent-light: rgba(250, 204, 21, 0.15); /* Transparent yellow for highlights */
+  
+  --shadow-color: rgba(0, 0, 0, 0.5);  /* Darker shadows */
+}
+
+/* Global transition for all elements */
+*, *::before, *::after {
+  transition: background-color var(--transition-speed) ease-in-out,
+              color var(--transition-speed) ease-in-out,
+              border-color var(--transition-speed) ease-in-out,
+              box-shadow var(--transition-speed) ease-in-out !important;
+}
+
+/* But not for transforms and opacity */
+*:not([style*="transform"]):not([style*="opacity"]) {
+  transform: none !important;
+}
+
+/* Apply styles directly to elements */
+[data-theme="dark"] body,
+[data-theme="dark"] #root {
+  background-color: var(--bg-main) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Main container */
+[data-theme="dark"] .flex.flex-col.h-screen {
+  background-color: var(--bg-main) !important;
+}
+
+/* Header */
+[data-theme="dark"] header {
+  background-color: var(--bg-header) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Sidebar */
+[data-theme="dark"] .flex.h-full > div:first-child {
+  background-color: var(--bg-sidebar) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Sidebar sections */
+[data-theme="dark"] .p-4.border-b {
+  background-color: var(--bg-sidebar) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Tree view area - more specific selector to ensure it gets applied */
+[data-theme="dark"] .flex-1.overflow-auto.p-2,
+[data-theme="dark"] div[class*="overflow-auto"][class*="scrollbar-thin"] {
+  background-color: var(--bg-tree-view) !important;
+}
+
+/* Editor area */
+[data-theme="dark"] .flex-1.flex.flex-col,
+[data-theme="dark"] .flex.h-full > div:nth-child(2) {
+  background-color: var(--bg-editor) !important;
+}
+
+/* Editor content */
+[data-theme="dark"] .p-4.h-full.flex.flex-col {
+  background-color: var(--bg-editor) !important;
+}
+
+/* Editor tabs */
+[data-theme="dark"] .flex.border-b.overflow-x-auto {
+  background-color: var(--bg-tabs) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Active tab */
+[data-theme="dark"] .flex.border-b.overflow-x-auto > div[class*="bg-white"],
+[data-theme="dark"] [class*="activeNoteId"] {
+  background-color: var(--bg-editor) !important;
+  color: var(--accent-color) !important;
+  border-bottom: 2px solid var(--accent-color) !important;
+}
+
+/* Note items */
+[data-theme="dark"] button[data-note-id],
+[data-theme="dark"] [class*="draggable-note"] {
+  background-color: var(--bg-tree-view) !important;
+  color: var(--text-secondary) !important;
+}
+
+/* Selected notebook and note */
+[data-theme="dark"] [class*="bg-yellow-100"],
+[data-theme="dark"] [class*="bg-yellow-900"],
+[data-theme="dark"] [class*="dark:bg-yellow-900"],
+[data-theme="dark"] button[data-note-id][class*="font-medium"],
+[data-theme="dark"] button[data-notebook-id][class*="font-medium"] {
+  background-color: var(--accent-light) !important;
+  color: var(--accent-color) !important;
+}
+
+/* Folder items */
+[data-theme="dark"] [data-folder-id] {
+  background-color: var(--bg-tree-view) !important;
+}
+
+/* Folder items - inner content */
+[data-theme="dark"] [data-folder-id] > div {
+  background-color: var(--bg-tree-view) !important;
+}
+
+/* Input fields */
+[data-theme="dark"] input,
+[data-theme="dark"] textarea {
+  background-color: var(--bg-sidebar) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Text colors */
+[data-theme="dark"] h1, 
+[data-theme="dark"] h2,
+[data-theme="dark"] h3 {
+  color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] p,
+[data-theme="dark"] span:not([class*="text-yellow"]):not([class*="text-red"]) {
+  color: var(--text-secondary) !important;
+}
+
+/* Focus rings */
+[data-theme="dark"] [class*="focus:ring"] {
+  --tw-ring-color: var(--accent-color) !important;
+}
+
+/* Buttons */
+[data-theme="dark"] button:not([disabled]) {
+  color: var(--text-secondary);
+}
+
+/* Yellow accent buttons */
+[data-theme="dark"] [class*="bg-yellow-"] {
+  background-color: var(--accent-color) !important;
+  color: #000000 !important;
+}
+
+/* Icon colors */
+[data-theme="dark"] svg:not([class*="text-yellow"]):not([class*="text-red"]) {
+  color: var(--text-muted) !important;
+}
+
+/* Hover states */
+[data-theme="dark"] [class*="hover:bg-gray"] {
+  background-color: var(--bg-tree-view) !important;
+}
+
+[data-theme="dark"] [class*="hover:bg-gray"]:hover {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Scrollbars */
+[data-theme="dark"] ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-track {
+  background: var(--bg-main);
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: #4a4a4f;
+  border-radius: 4px;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: #5a5a5f;
+}
+
+/* Toast messages */
+[data-theme="dark"] [class*="fixed bottom-4 right-4"] {
+  background-color: var(--bg-sidebar) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-color) !important;
+  box-shadow: 0 4px 6px var(--shadow-color) !important;
+}
+
+/* Light theme specific styles */
+/* Focus rings in light mode */
+[data-theme="light"] [class*="focus:ring"] {
+  --tw-ring-color: var(--accent-color) !important;
+}
+
+/* Selected notebook and note in light mode */
+[data-theme="light"] button[data-note-id][class*="font-medium"],
+[data-theme="light"] button[data-notebook-id][class*="font-medium"],
+[data-theme="light"] [class*="bg-blue-100"] {
+  background-color: var(--accent-light) !important;
+  color: var(--accent-color) !important;
+  font-weight: 500 !important;
+}
+
+/* Blue buttons in light mode */
+[data-theme="light"] [class*="bg-blue-500"],
+[data-theme="light"] [class*="bg-blue-600"] {
+  background-color: var(--accent-color) !important;
+  color: white !important;
+}
+
+/* Blue hover states in light mode */
+[data-theme="light"] [class*="hover:bg-blue-500"]:hover,
+[data-theme="light"] [class*="hover:bg-blue-600"]:hover {
+  background-color: var(--accent-hover) !important;
+}
+
+/* Input fields in light mode */
+[data-theme="light"] input,
+[data-theme="light"] textarea {
+  border-color: var(--border-color) !important;
+}
+
+[data-theme="light"] input:focus,
+[data-theme="light"] textarea:focus {
+  border-color: var(--accent-color) !important;
+}
+
+/* Active tab in light mode */
+[data-theme="light"] .flex.border-b.overflow-x-auto > div[class*="bg-white"] {
+  border-bottom: 2px solid var(--accent-color) !important;
+  font-weight: 500 !important;
+  color: var(--accent-color) !important;
+}
+
+/* Icon accent colors in light mode */
+[data-theme="light"] svg[class*="text-blue"] {
+  color: var(--accent-color) !important;
+}
+
+/* Buttons in light mode */
+[data-theme="light"] button[class*="rounded-md"]:not([disabled]):hover {
+  background-color: rgba(234, 179, 8, 0.1) !important;
+}
+
+/* Create buttons in light mode */
+[data-theme="light"] button[class*="bg-yellow-500"],
+[data-theme="light"] button[class*="bg-yellow-600"] {
+  background-color: var(--accent-color) !important;
+  color: white !important;
+}
+
+/* Make folder text stronger */
+[data-theme="light"] [data-folder-id] span.text-sm {
+  color: var(--text-secondary) !important;
+  font-weight: 500;
+}
+
+/* Hover states for tree items */
+[data-theme="light"] [class*="hover:bg-gray-100"]:hover {
+  background-color: rgba(234, 179, 8, 0.08) !important;
+}
+
+/* Toast messages in light mode */
+[data-theme="light"] [class*="fixed bottom-4 right-4"] {
+  background-color: var(--accent-color) !important;
+  color: white !important;
+  border: none !important;
+  box-shadow: 0 4px 6px var(--shadow-color) !important;
+} 

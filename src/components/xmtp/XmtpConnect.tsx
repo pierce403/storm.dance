@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Client } from '@xmtp/xmtp-js';
 import { ethers } from 'ethers';
 import { Button } from '@/components/ui/button';
-import { Loader2, LogIn, LogOut, Wifi, WifiOff, MessageSquare, Network, Send } from 'lucide-react';
+import { Loader2, LogIn, LogOut, Wifi, WifiOff, MessageSquare, Network, Send, AlertCircle } from 'lucide-react';
 import { createXmtpClientSafely, XmtpEnv } from '@/utils/xmtp-utils';
 
 // Ensure proper types
@@ -280,158 +280,85 @@ export function XmtpConnect({ onConnect, onDisconnect }: XmtpConnectProps) {
 
   const renderStatus = () => {
     switch (status) {
-      case 'connecting':
-        return <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Connecting...</>;
       case 'connected':
-        return <><Wifi className="h-4 w-4 mr-2 text-green-500" /> Connected</>;
+        return <span className="text-xs text-green-600 dark:text-green-400 flex items-center"><Wifi size={12} className="mr-1" /> Connected</span>;
+      case 'connecting':
+        return <span className="text-xs text-yellow-600 dark:text-yellow-400 flex items-center"><Loader2 size={12} className="mr-1 animate-spin" /> Connecting...</span>;
       case 'error':
-        return <><WifiOff className="h-4 w-4 mr-2 text-red-500" /> Error</>;
+        return <span className="text-xs text-red-600 dark:text-red-400 flex items-center"><AlertCircle size={12} className="mr-1" /> Error</span>;
       case 'disconnected':
       default:
-        return <><WifiOff className="h-4 w-4 mr-2 text-gray-500" /> Disconnected</>;
+        return <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center"><WifiOff size={12} className="mr-1" /> Disconnected</span>;
     }
   };
 
   const renderButton = () => {
-    if (status === 'connected' && address) {
-      return (
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={listConversations} disabled={isLoadingConversations}>
-            {isLoadingConversations ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+    switch (status) {
+      case 'connected':
+        return (
+          <Button variant="outline" size="sm" onClick={disconnectWallet} className="text-xs dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">
+            <LogOut size={14} className="mr-1" /> Disconnect
+          </Button>
+        );
+      case 'connecting':
+      case 'error': // Show connect button even on error to allow retry
+        return (
+          <Button variant="outline" size="sm" onClick={connectWallet} disabled={status === 'connecting'} className="text-xs dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700 disabled:opacity-50">
+            {status === 'connecting' ? (
+              <Loader2 size={14} className="mr-1 animate-spin" />
             ) : (
-              <MessageSquare className="h-4 w-4 mr-2" />
+              <LogIn size={14} className="mr-1" />
             )}
-            List Conversations
+            {status === 'connecting' ? 'Connecting...' : 'Connect Wallet'}
           </Button>
-          <Button variant="outline" size="sm" onClick={disconnectWallet} title="Disconnect XMTP Client">
-            <LogOut className="h-4 w-4 mr-2" />
-            Disconnect
+        );
+      case 'disconnected':
+      default:
+        return (
+          <Button variant="outline" size="sm" onClick={connectWallet} className="text-xs dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700">
+            <LogIn size={14} className="mr-1" /> Connect Wallet
           </Button>
-        </div>
-      );
+        );
     }
-    if (status === 'connecting' || isReconnecting) {
-       return (
-         <Button variant="outline" size="sm" disabled>
-            <Loader2 className="h-4 w-4 animate-spin" />
-         </Button>
-       );
-    }
-    // Show connect button if disconnected or error (and provider exists)
-    if ((status === 'disconnected' || status === 'error') && window.ethereum) {
-       return (
-        <Button variant="outline" size="sm" onClick={connectWallet}>
-            <LogIn className="h-4 w-4 mr-2" />
-            Connect Wallet
-        </Button>
-       );
-    }
-    // If error and no provider, show nothing or disabled state
-    return null; 
   };
 
   return (
-    <div className="p-3 border-b text-sm">
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center">
-          <span className="font-medium flex items-center mr-3">{renderStatus()}</span>
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={toggleNetwork}
-            disabled={isReconnecting || status === 'connecting'}
-            title={`Switch to ${networkEnv === 'dev' ? 'production' : 'dev'} network`}
-            className="h-7 px-2 text-xs"
-          >
-            <Network className="h-3 w-3 mr-1" />
-            {networkEnv === 'production' ? 'PROD' : 'DEV'}
-          </Button>
-        </div>
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
         {renderButton()}
+        <div className="flex items-center space-x-2">
+           {renderStatus()}
+           <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={toggleNetwork} 
+              disabled={isReconnecting || status === 'connecting'}
+              title={`Switch to ${networkEnv === 'dev' ? 'Production' : 'Development'} Network`}
+              className="h-6 w-6 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
+            >
+             {isReconnecting ? <Loader2 size={14} className="animate-spin" /> : <Network size={14} />}
+           </Button>
+        </div>
       </div>
-
-      {status === 'connected' && address && (
-        <div className="text-xs flex items-center justify-between">
-          <div className="text-gray-500 truncate" title={address}>
-            Logged in as: {address}
-          </div>
-          <div className="text-gray-500">
-            Network: {networkEnv}
-          </div>
-        </div>
+      {address && status === 'connected' && (
+        <p className="text-xs text-gray-600 dark:text-gray-400 truncate" title={address}>
+          Account: {address} ({networkEnv})
+        </p>
       )}
-
-      {status === 'error' && errorMsg && (
-        <div className="text-xs text-red-600 mt-1 break-words">
-          Error: {errorMsg}
-        </div>
+      {errorMsg && (
+        <p className="text-xs text-red-600 dark:text-red-400">{errorMsg}</p>
       )}
       
-      {status === 'connected' && (
-        <div className="mt-2 flex justify-between items-center">
-          <Button 
-            variant="secondary" 
-            size="sm" 
-            onClick={sendTestMessage} 
-            disabled={isSendingTestMessage || isLoadingConversations}
-            className="text-xs h-7 px-2"
-          >
-            {isSendingTestMessage ? (
-              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-            ) : (
-              <Send className="h-3 w-3 mr-1" />
-            )}
-            Send Test Message to Bot
-          </Button>
-          <div className="text-xs text-gray-500">
-            Messages are only visible on the same network
-          </div>
+      {/* Optional: Add UI for conversations list and test message */}
+      {/* {status === 'connected' && (
+        <div className="pt-2 border-t border-gray-200 dark:border-gray-700 space-y-1">
+           <Button variant="outline" size="sm" onClick={sendTestMessage} disabled={isSendingTestMessage} className="text-xs w-full dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700 disabled:opacity-50">
+              {isSendingTestMessage ? <Loader2 size={14} className="mr-1 animate-spin" /> : <Send size={14} className="mr-1" />}
+              Send Test Message
+            </Button>
+            {convError && <p className="text-xs text-red-600 dark:text-red-400">{convError}</p>}
         </div>
-      )}
-      
-      {/* Conversations section */}
-      {conversations.length > 0 && (
-        <div className="mt-3 border-t pt-2">
-          <h3 className="font-medium mb-2">
-            Your Conversations ({conversations.length}) 
-            <span className="text-xs font-normal ml-2 text-gray-500">on {networkEnv} network</span>
-          </h3>
-          <div className="max-h-48 overflow-y-auto">
-            {conversations.map((conv, index) => (
-              <div key={index} className="mb-2 p-2 bg-gray-50 rounded-md text-xs">
-                <div className="font-medium truncate" title={conv.peerAddress}>
-                  Peer: {conv.peerAddress}
-                </div>
-                {conv.latestMessage ? (
-                  <div className="mt-1 text-gray-600">
-                    <div>Latest: "{conv.latestMessage.content}"</div>
-                    <div className="flex justify-between mt-1">
-                      <span>From: {conv.latestMessage.sender}</span>
-                      <span>{conv.latestMessage.timestamp}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mt-1 text-gray-500">No messages yet</div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      
-      {isLoadingConversations && (
-        <div className="mt-3 flex items-center justify-center">
-          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          <span>Loading conversations...</span>
-        </div>
-      )}
-      
-      {convError && (
-        <div className="mt-3 text-xs text-amber-600">
-          {convError}
-        </div>
-      )}
+      )} */}
     </div>
   );
 } 

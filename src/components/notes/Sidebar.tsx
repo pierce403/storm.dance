@@ -34,23 +34,23 @@ interface SidebarProps {
 // Wrap component with forwardRef
 export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
   {
-    onXmtpConnect,
-    onXmtpDisconnect,
-    notebooks,
-    selectedNotebookId,
-    notes,
+  onXmtpConnect,
+  onXmtpDisconnect,
+  notebooks,
+  selectedNotebookId,
+  notes,
     folders,
-    selectedNoteId,
-    onSelectNotebook,
-    onSelectNote,
-    onCreateNote,
-    onDeleteNote,
+  selectedNoteId,
+  onSelectNotebook,
+  onSelectNote,
+  onCreateNote,
+  onDeleteNote,
     onCreateFolder,
     onDeleteFolder,
     onUpdateFolder,
     onMoveNoteToFolder,
     onMoveFolder,
-    isLoading,
+  isLoading,
     containerRef,
     editorTitleInputRef
   }, ref) => {
@@ -441,9 +441,9 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
         const isRenaming = renamingFolderId === folder.id;
 
         renderedElements.push(
-            <li key={`folder-${folder.id}`} className={`ml-${depth * 2} mb-px ${isBeingDragged ? 'opacity-40' : ''}`}>
+            <li key={`folder-${folder.id}`} className={`ml-${depth * 2} mb-px ${isBeingDragged ? 'opacity-40' : ''} list-none`}>
                 <div
-                    className={`flex items-center group rounded-sm ${isDragOver ? 'drag-over' : ''} focus-within:bg-blue-100`}
+                    className={`flex items-center group rounded-sm ${isDragOver ? 'bg-yellow-200 dark:bg-yellow-800/40' : ''} focus-within:bg-yellow-100 dark:focus-within:bg-yellow-900/30`}
                     onDragOver={(e) => handleDragOver(e, folder.id)}
                     onDragLeave={handleDragLeave}
                     onDrop={(e) => handleDrop(e, folder.id)}
@@ -457,7 +457,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                 >
                     <button
                         onClick={() => toggleFolder(folder.id)}
-                        className="p-1 mr-1 text-gray-500 hover:bg-gray-200 rounded-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+                        className="p-1 mr-1 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-sm focus:outline-none focus:ring-1 focus:ring-yellow-400"
                         aria-label={isExpanded ? `Collapse ${folder.name}` : `Expand ${folder.name}`}
                         tabIndex={-1}
                     >
@@ -469,7 +469,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                                 type="text"
                                 value={folderNewName}
                                 onChange={(e) => setFolderNewName(e.target.value)}
-                                className="flex-1 folder-edit-input"
+                                className="flex-1 folder-edit-input p-0.5 text-sm bg-white dark:bg-gray-800 border border-yellow-400 rounded-sm focus:outline-none dark:text-gray-100"
                                 autoFocus
                                 onBlur={handleRenameFolderSubmit} // Save on blur too
                                 onKeyDown={(e) => {
@@ -480,12 +480,12 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                          </form>
                      ) : (
                          <>
-                             <div className="flex items-center flex-1 p-1 rounded-sm group-hover:bg-gray-100">
-                                 <FolderIcon size={16} className="mr-1 text-gray-500" />
-                                 <span className="text-sm truncate select-none">{folder.name}</span>
+                             <div className="flex items-center flex-1 p-1 rounded-sm group-hover:bg-gray-100 dark:group-hover:bg-gray-800 text-gray-800 dark:text-gray-200">
+                                 <FolderIcon size={16} className="mr-1 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                                 <span className="text-sm truncate select-none flex-1">{folder.name}</span>
                              </div>
                               <button
-                                  className="p-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 text-blue-500 hover:bg-gray-200 rounded-sm focus:outline-none focus:ring-1 focus:ring-blue-400 mr-1"
+                                  className="p-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-100 dark:hover:bg-gray-700 rounded-sm focus:outline-none focus:ring-1 focus:ring-yellow-400 mr-1"
                                   onClick={(e) => {e.stopPropagation(); handleRenameFolderClick(folder);}}
                                   title="Rename folder"
                                   aria-label={`Rename folder ${folder.name}`}
@@ -494,7 +494,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                                   <Edit2 size={14} />
                               </button>
                               <button
-                                  className="p-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 text-red-500 hover:bg-red-100 rounded-sm focus:outline-none focus:ring-1 focus:ring-red-400"
+                                  className="p-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 text-red-500 hover:bg-red-100 dark:hover:bg-gray-700 rounded-sm focus:outline-none focus:ring-1 focus:ring-red-400"
                                   onClick={(e) => {e.stopPropagation(); onDeleteFolder(folder.id);}}
                                   title="Delete folder"
                                   aria-label={`Delete folder ${folder.name}`}
@@ -504,7 +504,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                               </button>
                          </>
                      )}
-                </div>
+             </div>
                 {isExpanded && (
                     <ul className="pl-4" role="group"> {/* Add role group for nested list */} 
                         {renderFolderTree(folder.id, depth + 1)}
@@ -519,14 +519,13 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
         renderedElements.push(
              <li
                 key={`note-${note.id}`}
-                className={`relative group ml-${depth * 2} ${isBeingDragged ? 'opacity-40' : ''}`}
+                className={`relative group ml-${depth * 2} list-none ${isBeingDragged ? 'opacity-40' : ''}`}
                 draggable
                 onDragStart={(e) => handleDragStart(e, 'note', note.id)}
                 onDragEnd={handleDragEnd} // Add drag end handler
              >
                 <button
-                    className={`w-full text-left px-3 py-1 my-px rounded-sm text-sm draggable-note focus:outline-none focus:bg-transparent focus:ring-1 focus:ring-blue-400 ${selectedNoteId === note.id ? 'bg-blue-100 font-medium' : 'hover:bg-gray-100'}`}
-                    // Removed drag opacity from button, apply to li
+                    className={`w-full text-left px-3 py-1 my-px rounded-sm text-sm draggable-note focus:outline-none focus:ring-1 focus:ring-yellow-400 focus:bg-yellow-100 dark:focus:bg-yellow-900/30 ${selectedNoteId === note.id ? 'bg-yellow-100 dark:bg-yellow-900/30 font-medium text-yellow-900 dark:text-yellow-100' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
                     onClick={() => onSelectNote(note)}
                     data-note-id={note.id}
                     ref={registerRef('note', note.id)}
@@ -535,7 +534,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                      <span className="block truncate select-none">{note.title || 'Untitled'}</span>
                 </button>
                  <button
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-sm opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-red-100 text-red-600 focus:outline-none focus:ring-1 focus:ring-red-400"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-sm opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-red-100 dark:hover:bg-gray-700 text-red-600 focus:outline-none focus:ring-1 focus:ring-red-400"
                     onClick={(e) => { e.stopPropagation(); onDeleteNote(note.id); }}
                     title="Delete note"
                     aria-label={`Delete note ${note.title || 'Untitled'}`}
@@ -583,46 +582,47 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
       className="h-full flex flex-col border-r focus:outline-none"
     >
        {/* XMTP Connect Section */} 
-        <div className="p-4 border-b">
+        <div className="p-4 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
             <XmtpConnect onConnect={onXmtpConnect} onDisconnect={onXmtpDisconnect} />
         </div>
-        <div className="p-4 flex-col space-y-2 border-b">
+        <div className="p-4 flex-col space-y-2 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
             <div className="flex justify-between items-center">
-                <h2 className="text-lg font-semibold">Notebooks</h2>
-                <button
-                    className="p-2 rounded-md hover:bg-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Notebooks</h2>
+            <button
+                    className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-yellow-400"
                     onClick={() => { /* TODO: Implement create notebook UI */ }}
                     aria-label="Create new notebook"
                     tabIndex={-1}
                 >
                     <Plus className="h-5 w-5" />
-                </button>
-            </div>
+            </button>
+         </div>
             {/* Notebook List */} 
              <ul className="space-y-1 mt-2">
               {notebooks.map((notebook) => (
                 <li key={notebook.id}>
                   <button
-                    className={`w-full flex items-center px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 ${selectedNotebookId === notebook.id ? "bg-gray-200" : "hover:bg-gray-100"}`}
+                    className={`w-full flex items-center px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-yellow-400 ${selectedNotebookId === notebook.id ? "bg-gray-200 dark:bg-yellow-900/30 font-medium dark:text-yellow-100" : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
                     onClick={() => onSelectNotebook(notebook.id)}
                     tabIndex={-1}
+                    data-notebook-id={notebook.id}
                   >
-                    <Book className="h-4 w-4 mr-2" />
-                    <span className="truncate">{notebook.name}</span>
+                    <Book className="h-4 w-4 mr-2 flex-shrink-0 text-gray-500 dark:text-gray-400" />
+                    <span className="truncate flex-1 text-left">{notebook.name}</span>
                   </button>
                 </li>
               ))}
             </ul>
-        </div>
+      </div>
 
       {/* Folders and Notes Section */} 
       <div className="flex-1 overflow-hidden flex flex-col">
-          <div className="p-4 flex justify-between items-center border-b">
-            <h2 className="text-lg font-semibold">Notes</h2>
+          <div className="p-4 flex justify-between items-center border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
+            <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Notes</h2>
              {/* ... Create Folder/Note buttons ... */}
               <div className="flex">
                  <button
-                    className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50 mr-1 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 disabled:opacity-50 mr-1 focus:outline-none focus:ring-1 focus:ring-yellow-400"
                     onClick={() => { setIsCreatingFolder(true); setNewFolderParentId(null); }}
                     title="Create new folder"
                     disabled={!selectedNotebookId || isLoading}
@@ -631,46 +631,46 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                  >
                     <FolderIcon className="h-5 w-5" />
                  </button>
-                 <button
-                    className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            <button
+                    className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-yellow-400"
                     onClick={() => onCreateNote()} // Use onCreateNote directly
                     title="Create new note (n)"
-                    disabled={!selectedNotebookId || isLoading}
+              disabled={!selectedNotebookId || isLoading}
                     aria-label="Create new note"
                     tabIndex={-1}
-                 >
-                    <Plus className="h-5 w-5" />
-                 </button>
-              </div>
+            >
+              <Plus className="h-5 w-5" />
+            </button>
           </div>
+                </div>
 
            {/* ... Folder Creation Form ... */} 
            {isCreatingFolder && (
-                <div className="px-4 py-2 border-b">
+                <div className="px-4 py-2 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
                   <form onSubmit={handleCreateFolderSubmit} className="mt-2">
                     <input
                       type="text"
                       value={newFolderName}
                       onChange={(e) => setNewFolderName(e.target.value)}
                       placeholder="Folder name"
-                      className="w-full p-2 border rounded-md text-sm"
+                      className="w-full p-2 border rounded-md text-sm bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-yellow-400 focus:border-yellow-400 dark:text-gray-100"
                       autoFocus
                       onKeyDown={(e) => { if (e.key === 'Escape') setIsCreatingFolder(false); }}
                     />
                      <div className="flex justify-end mt-2 space-x-2">
-                       <button
+                      <button
                          type="button"
                          onClick={() => setIsCreatingFolder(false)}
-                         className="px-2 py-1 text-sm text-gray-600 hover:bg-gray-100 rounded-md"
+                         className="px-2 py-1 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md"
                        >
                          Cancel
-                       </button>
-                       <button
+                      </button>
+                      <button
                          type="submit"
-                         className="px-2 py-1 text-sm bg-blue-500 text-white rounded-md hover:bg-blue-600"
+                         className="px-2 py-1 text-sm bg-yellow-500 text-black rounded-md hover:bg-yellow-600 dark:bg-yellow-400 dark:hover:bg-yellow-500"
                        >
                          Create
-                       </button>
+                      </button>
                      </div>
                   </form>
                 </div>
@@ -678,17 +678,17 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
 
           {/* Tree View Area */} 
           <div
-            className="flex-1 overflow-auto p-2"
+            className="flex-1 overflow-auto p-2 bg-white dark:bg-gray-850 !important scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 dark:scrollbar-thumb-gray-600 dark:hover:scrollbar-thumb-gray-500"
              onDragOver={(e) => handleDragOver(e, null)} // Allow dropping on root area
              onDragLeave={handleDragLeave}
              onDrop={(e) => handleDrop(e, null)}
           >
             {isLoading ? (
-               <div className="flex items-center justify-center h-20 text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading...</div>
+               <div className="flex items-center justify-center h-20 text-gray-500 dark:text-gray-400"><Loader2 className="mr-2 h-4 w-4 animate-spin text-gray-500 dark:text-gray-400" /> Loading...</div>
             ) : !selectedNotebookId ? (
-               <p className="text-center text-gray-500 p-4">Select a notebook</p>
+               <p className="text-center text-gray-500 dark:text-gray-400 p-4 italic">Select a notebook</p>
             ) : (folders.length === 0 && notes.filter(n => n.folderId === null && n.notebookId === selectedNotebookId).length === 0) ? (
-               <p className="text-center text-gray-500 p-4">No notes or folders yet</p>
+               <p className="text-center text-gray-500 dark:text-gray-400 p-4 italic">No notes or folders yet</p>
             ) : (
                 <ul
                   className="space-y-px list-none p-0 m-0"
@@ -698,7 +698,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                 >
                     {renderFolderTree(null)}
                 </ul>
-            )}
+              )}
           </div>
       </div>
     </div>

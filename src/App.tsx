@@ -4,7 +4,9 @@ import { Editor } from './components/notes/Editor';
 import { EditorTabs } from './components/notes/EditorTabs';
 import { Note, Notebook, Folder, dbService, DB_NAME } from './lib/db';
 import { Client } from '@xmtp/xmtp-js';
+import { Sun, Moon } from 'lucide-react';
 import './App.css';
+import './DarkTheme.css';
 
 function App() {
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
@@ -19,6 +21,22 @@ function App() {
   const [isDbBlocked, setIsDbBlocked] = useState(false);
   const [toastMessage, setToastMessage] = useState<{title: string, description: string, variant?: 'default' | 'destructive'} | null>(null);
   const [activeColumn, setActiveColumn] = useState<'notebooks' | 'notes' | 'editor'>('notes');
+
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const savedTheme = localStorage.getItem('theme');
+    if (!savedTheme) {
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    return savedTheme === 'dark' ? 'dark' : 'light';
+  });
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('theme');
+    const initialTheme = savedTheme === 'dark' ? 'dark' : 
+                         (savedTheme === 'light' ? 'light' : 
+                         (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    document.documentElement.setAttribute('data-theme', initialTheme);
+  }, []);
 
   const notesColumnRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -348,21 +366,30 @@ function App() {
       setUserAddress(null);
   };
 
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prevTheme => (prevTheme === 'light' ? 'dark' : 'light'));
+  };
+
   if (isDbBlocked) {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-        <div className="bg-white p-8 rounded-lg shadow-xl text-center">
+      <div className="fixed inset-0 bg-black bg-opacity-75 dark:bg-opacity-90 flex items-center justify-center z-50">
+        <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-xl text-center">
           <h2 className="text-xl font-bold mb-4">Database Update Required</h2>
-          <p className="mb-6 text-gray-700">
+          <p className="mb-6 text-gray-700 dark:text-gray-300">
             storm.dance needs to update its database schema, but another tab might be blocking it.
             Please close any other open tabs running this application.
           </p>
-          <p className="mb-6 text-gray-700">
+          <p className="mb-6 text-gray-700 dark:text-gray-300">
             If the issue persists, you can clear the local storage. <strong className="text-red-600">This will delete all your current notes.</strong>
           </p>
           <button
             onClick={handleClearStorage}
-            className="px-6 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+            className="px-6 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
           >
             Clear Storage & Reload
           </button>
@@ -372,15 +399,22 @@ function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-background font-sans antialiased">
-      <header className="border-b p-4">
+    <div className={`flex flex-col h-screen bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 font-sans antialiased`}>
+      <header className="border-b p-4 flex justify-between items-center bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700">
         <h1 className="text-2xl font-bold">storm.dance</h1>
+        <button 
+          onClick={toggleTheme} 
+          className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-yellow-400"
+          aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+        >
+          {theme === 'light' ? <Moon className="h-5 w-5 text-yellow-600" /> : <Sun className="h-5 w-5 text-yellow-500" />}
+        </button>
       </header>
       
       <main className="flex-1 overflow-hidden">
         <div className="flex h-full">
           <div
-            className="w-1/4 min-w-[200px] max-w-[300px] border-r flex flex-col"
+            className="w-1/4 min-w-[200px] max-w-[300px] border-r border-gray-200 dark:border-gray-700 flex flex-col bg-gray-50 dark:bg-gray-900 !important"
             onFocusCapture={() => setActiveColumn('notebooks')}
           >
             <Sidebar
@@ -426,7 +460,7 @@ function App() {
                         onSelectTab={setActiveNoteId}
                         onCloseTab={handleCloseTab}
                     />
-                    <div className="flex-1 overflow-auto">
+                    <div className="flex-1 overflow-auto scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 dark:scrollbar-thumb-gray-600 dark:hover:scrollbar-thumb-gray-500">
                         <Editor
                           note={activeNote}
                           onUpdateNote={handleUpdateNote}
@@ -436,8 +470,8 @@ function App() {
                     </div>
                 </>
             ) : (
-                 <div className="flex items-center justify-center h-full text-muted-foreground">
-                    Select a note to open it.
+                 <div className="flex items-center justify-center h-full text-gray-400 dark:text-gray-500">
+                    <p className="italic">Select a note to open it.</p>
                 </div>
             )}
           </div>
@@ -445,8 +479,10 @@ function App() {
       </main>
       
       {toastMessage && (
-        <div className={`fixed bottom-4 right-4 p-4 rounded-md shadow-lg ${
-          toastMessage.variant === 'destructive' ? 'bg-red-500 text-white' : 'bg-green-500 text-white'
+        <div className={`fixed bottom-4 right-4 p-4 rounded-md shadow-lg text-white ${ 
+          toastMessage.variant === 'destructive' 
+          ? 'bg-red-600 dark:bg-red-700' 
+          : 'bg-green-600 dark:bg-green-700'
         }`}>
           <h3 className="font-bold">{toastMessage.title}</h3>
           <p>{toastMessage.description}</p>

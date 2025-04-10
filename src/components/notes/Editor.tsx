@@ -42,56 +42,29 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
 
   if (!note) {
     return (
-      <div className="flex items-center justify-center h-full text-gray-500">
-        <p>Select a note or create a new one</p>
+      <div className="p-4 h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
+        <p className="italic">Select a note to view or edit.</p>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full p-4">
+    <div className="p-4 h-full flex flex-col bg-white dark:bg-gray-950">
       <input
+        ref={titleInputRef}
         type="text"
         value={title}
         onChange={handleTitleChange}
-        placeholder="Note title"
-        className="text-xl font-semibold mb-4 p-2 border-b focus:outline-none focus:border-blue-500"
-        ref={titleInputRef}
+        placeholder="Note Title"
+        className="text-2xl font-bold mb-4 p-2 border-b bg-transparent border-gray-300 dark:border-gray-700 focus:outline-none focus:border-yellow-400 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
       />
-      <div className="flex-1 flex flex-col">
-        <div className="border-b mb-2">
-          <button
-            className={`px-4 py-2 ${activeTab === 'edit' ? 'border-b-2 border-blue-500' : ''}`}
-            onClick={() => setActiveTab('edit')}
-          >
-            Edit
-          </button>
-          <button
-            className={`px-4 py-2 ${activeTab === 'preview' ? 'border-b-2 border-blue-500' : ''}`}
-            onClick={() => setActiveTab('preview')}
-          >
-            Preview
-          </button>
-        </div>
-        
-        {activeTab === 'edit' ? (
-          <textarea
-            value={content}
-            onChange={handleContentChange}
-            placeholder="Write your note in Markdown..."
-            className="flex-1 resize-none font-mono p-2 border rounded-md focus:outline-none focus:border-blue-500"
-            ref={textAreaRef}
-          />
-        ) : (
-          <div className="flex-1 overflow-auto p-4 border rounded-md">
-            {content ? (
-              <ReactMarkdown>{content}</ReactMarkdown>
-            ) : (
-              <p className="text-gray-500">Nothing to preview</p>
-            )}
-          </div>
-        )}
-      </div>
+      <textarea
+        ref={textAreaRef}
+        value={content}
+        onChange={handleContentChange}
+        placeholder="Start writing your note..."
+        className="flex-1 w-full p-2 bg-transparent focus:outline-none resize-none dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
+      />
     </div>
   );
 }
