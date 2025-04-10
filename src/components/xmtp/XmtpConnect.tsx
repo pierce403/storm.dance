@@ -122,15 +122,6 @@ export function XmtpConnect({ onConnect, onDisconnect }: XmtpConnectProps) {
     }
   };
 
-  const listConversations = async () => {
-    if (status !== 'connected') {
-      console.warn("Cannot list conversations: Not connected.")
-      return;
-    }
-    // ... rest of listConversations (might need adjustment if _client was removed)
-    // NOTE: This function might now be unused as well if nothing calls it.
-  };
-
   // --- Render Logic ---
 
   const renderStatus = () => {

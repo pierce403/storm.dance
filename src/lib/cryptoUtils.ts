@@ -104,7 +104,7 @@ export const decryptBackup = async (password: string, wrapper: any): Promise<any
         const ciphertext = base64ToArrayBuffer(wrapper.ciphertext);
 
         // 3. Derive Key
-        const key = await deriveKey(password, salt, iterations);
+        const key = await deriveKey(password, new Uint8Array(salt), iterations);
 
         // 4. Decrypt
         const decryptedCompressedBuffer = await crypto.subtle.decrypt(

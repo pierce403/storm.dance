@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, RefObject } from 'react';
+import React, { useEffect, RefObject } from 'react';
 import { Note } from '../../lib/db';
 
 interface EditorProps {
