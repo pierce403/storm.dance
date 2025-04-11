@@ -8,6 +8,8 @@ import { Sun, Moon, Upload, Key, AlertCircle } from 'lucide-react';
 import './App.css';
 import './DarkTheme.css';
 import { decryptBackup } from './lib/cryptoUtils';
+import { TopBar } from './components/TopBar';
+import { XmtpConnect } from './components/xmtp/XmtpConnect';
 
 // --- Types for Import --- 
 interface ExportedFolder {
@@ -80,8 +82,12 @@ function App() {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [openNoteIds, setOpenNoteIds] = useState<string[]>([]);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
-  const [_xmtpClient, setXmtpClient] = useState<Client | null>(null);
-  const [_userAddress, setUserAddress] = useState<string | null>(null);
+  const [xmtpClient, setXmtpClient] = useState<Client | null>(null);
+  const [userAddress, setUserAddress] = useState<string | null>(null);
+  const [xmtpStatus, setXmtpStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
+  const [xmtpErrorMsg, setXmtpErrorMsg] = useState<string | null>(null);
+  const [xmtpNetworkEnv, setXmtpNetworkEnv] = useState<'dev' | 'production'>('production');
+  const [isXmtpConnecting, setIsXmtpConnecting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isDbBlocked, setIsDbBlocked] = useState(false);
   const [toastMessage, setToastMessage] = useState<{title: string, description: string, variant?: 'default' | 'destructive'} | null>(null);
@@ -422,16 +428,48 @@ function App() {
     }
   };
 
-  const handleXmtpConnect = (client: Client, address: string) => {
-      console.log("App: XMTP Connected", { address });
-      setXmtpClient(client);
-      setUserAddress(address);
+  const handleXmtpConnectAttempt = async () => {
+    console.log("App: Attempting XMTP Connect...");
+    setIsXmtpConnecting(true);
+    setXmtpStatus('connecting');
+    setXmtpErrorMsg(null);
+  };
+
+  const handleXmtpConnected = (client: Client, address: string, env: 'dev' | 'production') => {
+    console.log("App: XMTP Connected", { address, env });
+    setXmtpClient(client);
+    setUserAddress(address);
+    setXmtpStatus('connected');
+    setXmtpNetworkEnv(env);
+    setXmtpErrorMsg(null);
+    setIsXmtpConnecting(false);
   };
 
   const handleXmtpDisconnect = () => {
-      console.log("App: XMTP Disconnected");
-      setXmtpClient(null);
-      setUserAddress(null);
+    console.log("App: XMTP Disconnected");
+    setXmtpClient(null);
+    setUserAddress(null);
+    setXmtpStatus('disconnected');
+    setXmtpErrorMsg(null);
+    setIsXmtpConnecting(false);
+  };
+
+  const handleXmtpError = (errorMessage: string) => {
+    console.error("App: XMTP Error", errorMessage);
+    setXmtpClient(null);
+    setUserAddress(null);
+    setXmtpStatus('error');
+    setXmtpErrorMsg(errorMessage);
+    setIsXmtpConnecting(false);
+  };
+
+  const handleXmtpToggleNetwork = async () => {
+    if (isXmtpConnecting) return;
+    console.log("App: Toggling XMTP Network...");
+    const newEnv = xmtpNetworkEnv === 'dev' ? 'production' : 'dev';
+    handleXmtpDisconnect(); 
+    setXmtpNetworkEnv(newEnv);
+    setTimeout(() => handleXmtpConnectAttempt(), 100); 
   };
 
   // --- Notebook Deletion --- 
@@ -620,32 +658,18 @@ function App() {
 
   return (
     <div className={`flex flex-col h-screen bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 font-sans antialiased`}>
-      <header className="border-b p-4 flex justify-between items-center bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700">
-        <h1 className="text-2xl font-bold">storm.dance</h1>
-        <div className="flex items-center space-x-2">
-          {/* Import Button */} 
-         <label className={`px-3 py-1.5 text-sm rounded-md flex items-center cursor-pointer 
-                           bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 
-                           ${isImporting ? 'opacity-50 cursor-not-allowed' : ''}`}>
-             <Upload size={14} className="mr-1"/>
-             Import
-             <input 
-                 type="file" 
-                 className="hidden" 
-                 accept=".json,.json.encrypted" // Accept both for flexibility
-                 onChange={handleFileChange}
-                 disabled={isImporting}
-             />
-         </label>
-          <button 
-            onClick={toggleTheme} 
-            className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-yellow-400"
-            aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
-          >
-            {theme === 'light' ? <Moon className="h-5 w-5 text-yellow-600" /> : <Sun className="h-5 w-5 text-yellow-500" />}
-          </button>
-        </div>
-      </header>
+      <TopBar
+        theme={theme}
+        toggleTheme={toggleTheme}
+        xmtpStatus={xmtpStatus}
+        xmtpAddress={userAddress}
+        xmtpNetworkEnv={xmtpNetworkEnv}
+        onXmtpConnect={handleXmtpConnectAttempt}
+        onXmtpDisconnect={handleXmtpDisconnect}
+        onXmtpToggleNetwork={handleXmtpToggleNetwork}
+        onFileChange={handleFileChange}
+        isImporting={isImporting}
+      />
       
       <main className="flex-1 overflow-hidden">
         <div className="flex h-full">
@@ -655,8 +679,13 @@ function App() {
           >
             <Sidebar
               ref={sidebarRef}
-              onXmtpConnect={handleXmtpConnect}
-              onXmtpDisconnect={handleXmtpDisconnect}
+              xmtpClient={xmtpClient}
+              onXmtpConnected={handleXmtpConnected}
+              onXmtpDisconnected={handleXmtpDisconnect}
+              onXmtpError={handleXmtpError}
+              initialXmtpNetworkEnv={xmtpNetworkEnv}
+              triggerXmtpConnect={isXmtpConnecting && xmtpStatus === 'connecting'}
+              triggerXmtpDisconnect={xmtpStatus === 'disconnected'}
               notebooks={notebooks}
               selectedNotebookId={selectedNotebookId}
               notes={notes}
@@ -715,7 +744,6 @@ function App() {
         </div>
       </main>
       
-      {/* Import Password Modal Render */} 
       {showPasswordModal && importFile && (
          <ImportPasswordModal 
              fileName={importFile.name}

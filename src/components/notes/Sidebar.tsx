@@ -12,8 +12,16 @@ export interface SidebarHandle {
 }
 
 interface SidebarProps {
-  onXmtpConnect: (client: Client, address: string) => void;
-  onXmtpDisconnect: () => void;
+  // Updated XMTP props
+  xmtpClient?: Client | null;
+  onXmtpConnected: (client: Client, address: string, env: 'dev' | 'production') => void;
+  onXmtpDisconnected: () => void;
+  onXmtpError: (errorMessage: string) => void;
+  initialXmtpNetworkEnv: 'dev' | 'production';
+  triggerXmtpConnect: boolean;
+  triggerXmtpDisconnect: boolean;
+  
+  // Existing props
   notebooks: Notebook[];
   selectedNotebookId: string | null;
   notes: Note[];
@@ -37,24 +45,32 @@ interface SidebarProps {
 // Wrap component with forwardRef
 export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
   {
-  onXmtpConnect,
-  onXmtpDisconnect,
-  notebooks,
-  selectedNotebookId,
-  notes,
+    // Updated XMTP props
+    xmtpClient,
+    onXmtpConnected,
+    onXmtpDisconnected,
+    onXmtpError,
+    initialXmtpNetworkEnv,
+    triggerXmtpConnect,
+    triggerXmtpDisconnect,
+    
+    // Existing props
+    notebooks,
+    selectedNotebookId,
+    notes,
     folders,
-  selectedNoteId,
-  onSelectNotebook,
-  onSelectNote,
-  onCreateNote,
-  onDeleteNote,
+    selectedNoteId,
+    onSelectNotebook,
+    onSelectNote,
+    onCreateNote,
+    onDeleteNote,
     onCreateFolder,
     onDeleteFolder,
     onUpdateFolder,
     onDeleteNotebook,
     onMoveNoteToFolder,
     onMoveFolder,
-  isLoading,
+    isLoading,
     containerRef,
     editorTitleInputRef
   }, ref) => {
@@ -588,7 +604,14 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     >
        {/* XMTP Connect Section */} 
         <div className="p-4 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
-            <XmtpConnect onConnect={onXmtpConnect} onDisconnect={onXmtpDisconnect} />
+            <XmtpConnect
+              onConnect={onXmtpConnected}
+              onDisconnect={onXmtpDisconnected}
+              onError={onXmtpError}
+              initialNetworkEnv={initialXmtpNetworkEnv}
+              triggerConnect={triggerXmtpConnect}
+              triggerDisconnect={triggerXmtpDisconnect}
+            />
         </div>
         <div className="p-4 flex-col space-y-2 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
             <div className="flex justify-between items-center">
