@@ -6,6 +6,7 @@ type IpfsConnectionStatus = 'checking' | 'connected_local' | 'connected_public' 
 
 interface IpfsSettings {
   customEndpoint: string;
+  localEndpoint: string;
   useCustomEndpoint: boolean;
 }
 
@@ -15,8 +16,9 @@ export function IpfsStatusIndicator() {
   const [settings, setSettings] = useState<IpfsSettings>(() => {
     const savedSettings = localStorage.getItem('ipfsSettings');
     return savedSettings ? JSON.parse(savedSettings) : {
-      customEndpoint: 'http://localhost:5001',
-      useCustomEndpoint: false
+      customEndpoint: '',
+      useCustomEndpoint: false,
+      localEndpoint: 'http://localhost:5001',
     };
   });
   const [tempSettings, setTempSettings] = useState<IpfsSettings>(settings);
@@ -60,7 +62,7 @@ export function IpfsStatusIndicator() {
         }
       } else {
         // Try default local node
-        console.log('Attempting to connect to local IPFS node at http://localhost:5001');
+        console.log(`Attempting to connect to local IPFS node at ${configToCheck.localEndpoint}`);
         connected = await tryConnectToIpfs('http://localhost:5001');
         console.log(`Local node connection result: ${connected ? 'SUCCESS' : 'FAILED'}`);
         
@@ -186,6 +188,17 @@ export function IpfsStatusIndicator() {
       console.error(`IPFS connection attempt failed for ${endpoint}:`, error);
       // More details about the error
       if (error instanceof TypeError) {
+        console.error(`IPFS: Network error - this often means:`);
+        console.error(`  1. There's no local IPFS node running at ${endpoint} (if trying to connect locally).`);
+        console.error(`     - Tip: Ensure your IPFS daemon is running. Try 'ipfs daemon' in your terminal.`);
+        console.error(`     - Tip: If using a custom endpoint, check it's correctly specified and the IPFS daemon allows connections from this origin.`);
+        console.error(`  2. There's a CORS issue preventing the browser from accessing the IPFS node.`);
+        console.error(`     - Tip: If connecting locally, ensure your IPFS daemon is configured to allow CORS requests from this web app's origin.`);
+        console.error(`     - Tip: If using a custom endpoint, verify that it has proper CORS headers configured.`);
+        console.error(`  3. General network problems or the endpoint is unreachable.`);
+        console.error(`     - Tip: Check your network connection.`);
+        console.error(`     - Tip: Verify the endpoint address is correct (no typos).`);
+        console.error(`     - Tip: Test the endpoint with 'curl ${endpoint}/api/v0/version' to see if it responds.`);
         console.error(`IPFS: Network error - this often means CORS issues, the endpoint doesn't exist, or network problems`);
       } else if (error instanceof DOMException && error.name === 'AbortError') {
         console.error(`IPFS: Request was aborted due to timeout`);
@@ -284,6 +297,18 @@ export function IpfsStatusIndicator() {
               placeholder="e.g., http://localhost:5001"
               className="w-full text-xs p-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 dark:text-gray-200 disabled:opacity-50"
             />
+          </div>
+          
+          <div className="mb-3">
+            <label className="block text-xs mb-1 dark:text-gray-300">Local IPFS endpoint</label>
+            <input
+              type="text"
+              value={tempSettings.localEndpoint}
+              onChange={(e) => setTempSettings({...tempSettings, localEndpoint: e.target.value})}
+              placeholder="http://localhost:5001"
+              className="w-full text-xs p-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 dark:text-gray-200"
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Default: http://localhost:5001</p>
           </div>
           
           {errorMessage && (
