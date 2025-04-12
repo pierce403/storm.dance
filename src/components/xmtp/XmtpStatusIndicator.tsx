@@ -1,4 +1,3 @@
-import React from 'react';
 import { Loader2, LogIn, LogOut, Wifi, WifiOff, AlertCircle, Network } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 

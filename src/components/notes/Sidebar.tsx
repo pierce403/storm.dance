@@ -46,7 +46,8 @@ interface SidebarProps {
 export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
   {
     // Updated XMTP props
-    xmtpClient,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    xmtpClient, // Marked as unused but kept for future use
     onXmtpConnected,
     onXmtpDisconnected,
     onXmtpError,

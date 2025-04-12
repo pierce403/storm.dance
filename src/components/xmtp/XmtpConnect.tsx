@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Client } from '@xmtp/xmtp-js';
 import { ethers } from 'ethers';
-import { Button } from '@/components/ui/button';
-import { Loader2, LogIn, LogOut, Wifi, WifiOff, Network, AlertCircle } from 'lucide-react';
 import { createXmtpClientSafely, XmtpEnv } from '@/utils/xmtp-utils';
 
 // Ensure proper types
@@ -33,9 +31,9 @@ export function XmtpConnect({
 }: XmtpConnectProps) {
   const [_signer, setSigner] = useState<ethers.Signer | null>(null);
   const [status, setStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
-  const [address, setAddress] = useState<string | null>(null);
+  // State that's used for display only in this component
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [networkEnv, setNetworkEnv] = useState<XmtpEnv>(initialNetworkEnv);
+  const [networkEnv] = useState<XmtpEnv>(initialNetworkEnv);
   const [isInitializing, setIsInitializing] = useState(true);
   
   // Add log function to keep track of important debug information
@@ -93,7 +91,6 @@ export function XmtpConnect({
         const signerInstance = await provider.getSigner();
         setSigner(signerInstance);
         const userAddress = await signerInstance.getAddress();
-        setAddress(userAddress);
         addDebugLog(`Signer obtained for address: ${userAddress}`);
 
         addDebugLog(`Creating XMTP client on ${networkEnv} network...`);
@@ -110,7 +107,6 @@ export function XmtpConnect({
         setStatus('error');
         setErrorMsg(errorMessage);
         setSigner(null);
-        setAddress(null);
         onDisconnect(); // Ensure parent state is cleared
         if (onError) onError(errorMessage);
     }
@@ -120,7 +116,6 @@ export function XmtpConnect({
     addDebugLog("Disconnecting XMTP client...");
     setSigner(null);
     setStatus('disconnected');
-    setAddress(null);
     setErrorMsg(null);
     onDisconnect(); // Notify parent
     // Note: This doesn't disconnect from Metamask itself, just our app state

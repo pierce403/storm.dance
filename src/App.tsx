@@ -4,7 +4,7 @@ import { Editor } from './components/notes/Editor';
 import { EditorTabs } from './components/notes/EditorTabs';
 import { Note, Notebook, Folder, dbService, DB_NAME } from './lib/db';
 import { Client } from '@xmtp/xmtp-js';
-import { Sun, Moon, Upload, Key, AlertCircle } from 'lucide-react';
+import { Key, AlertCircle } from 'lucide-react';
 import './App.css';
 import './DarkTheme.css';
 import { decryptBackup } from './lib/cryptoUtils';
@@ -85,7 +85,6 @@ function App() {
   const [xmtpClient, setXmtpClient] = useState<Client | null>(null);
   const [userAddress, setUserAddress] = useState<string | null>(null);
   const [xmtpStatus, setXmtpStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
-  const [xmtpErrorMsg, setXmtpErrorMsg] = useState<string | null>(null);
   const [xmtpNetworkEnv, setXmtpNetworkEnv] = useState<'dev' | 'production'>('production');
   const [isXmtpConnecting, setIsXmtpConnecting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -432,7 +431,6 @@ function App() {
     console.log("App: Attempting XMTP Connect...");
     setIsXmtpConnecting(true);
     setXmtpStatus('connecting');
-    setXmtpErrorMsg(null);
   };
 
   const handleXmtpConnected = (client: Client, address: string, env: 'dev' | 'production') => {
@@ -441,7 +439,6 @@ function App() {
     setUserAddress(address);
     setXmtpStatus('connected');
     setXmtpNetworkEnv(env);
-    setXmtpErrorMsg(null);
     setIsXmtpConnecting(false);
   };
 
@@ -450,7 +447,6 @@ function App() {
     setXmtpClient(null);
     setUserAddress(null);
     setXmtpStatus('disconnected');
-    setXmtpErrorMsg(null);
     setIsXmtpConnecting(false);
   };
 
@@ -459,7 +455,6 @@ function App() {
     setXmtpClient(null);
     setUserAddress(null);
     setXmtpStatus('error');
-    setXmtpErrorMsg(errorMessage);
     setIsXmtpConnecting(false);
   };
 
