@@ -46,8 +46,7 @@ interface SidebarProps {
 export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
   {
     // Updated XMTP props
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    xmtpClient, // Marked as unused but kept for future use
+    xmtpClient,
     onXmtpConnected,
     onXmtpDisconnected,
     onXmtpError,
@@ -597,6 +596,9 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     }
   }));
 
+  // Pass the xmtpClient to the connection status indicator
+  const xmtpConnected = !!xmtpClient;
+
   return (
     <div
       ref={containerRef}
@@ -612,6 +614,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
               initialNetworkEnv={initialXmtpNetworkEnv}
               triggerConnect={triggerXmtpConnect}
               triggerDisconnect={triggerXmtpDisconnect}
+              isConnected={xmtpConnected}
             />
         </div>
         <div className="p-4 flex-col space-y-2 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">

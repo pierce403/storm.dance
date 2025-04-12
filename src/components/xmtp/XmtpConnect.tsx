@@ -19,6 +19,7 @@ interface XmtpConnectProps {
   initialNetworkEnv?: XmtpEnv;
   triggerConnect?: boolean;
   triggerDisconnect?: boolean;
+  isConnected?: boolean;
 }
 
 export function XmtpConnect({ 
@@ -28,6 +29,7 @@ export function XmtpConnect({
   initialNetworkEnv = 'production',
   triggerConnect = false,
   triggerDisconnect = false,
+  isConnected = false,
 }: XmtpConnectProps) {
   const [_signer, setSigner] = useState<ethers.Signer | null>(null);
   const [status, setStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
@@ -126,7 +128,7 @@ export function XmtpConnect({
   
   return (
     <div className="text-xs text-gray-500 dark:text-gray-400">
-      {status === 'connected' ? (
+      {status === 'connected' || isConnected ? (
         <span>Connected to XMTP: {networkEnv}</span>
       ) : status === 'connecting' ? (
         <span>Connecting to XMTP...</span>

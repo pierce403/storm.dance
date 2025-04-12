@@ -9,7 +9,6 @@ import './App.css';
 import './DarkTheme.css';
 import { decryptBackup } from './lib/cryptoUtils';
 import { TopBar } from './components/TopBar';
-import { XmtpConnect } from './components/xmtp/XmtpConnect';
 
 // --- Types for Import --- 
 interface ExportedFolder {
