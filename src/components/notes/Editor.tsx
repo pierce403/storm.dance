@@ -11,8 +11,15 @@ interface EditorProps {
 export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: EditorProps) {
   useEffect(() => {
     if (note) {
+      // Update input values when note changes
+      if (titleInputRef.current) {
+        titleInputRef.current.value = note.title || '';
+      }
+      if (textAreaRef.current) {
+        textAreaRef.current.value = note.content || '';
+      }
     }
-  }, [note]);
+  }, [note, titleInputRef, textAreaRef]);
 
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (note) {
@@ -39,12 +46,14 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
       <input
         ref={titleInputRef}
         type="text"
+        value={note.title || ''}
         onChange={handleTitleChange}
         placeholder="Note Title"
         className="text-2xl font-bold mb-4 p-2 border-b bg-transparent border-gray-300 dark:border-gray-700 focus:outline-none focus:border-yellow-400 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
       />
       <textarea
         ref={textAreaRef}
+        value={note.content || ''}
         onChange={handleContentChange}
         placeholder="Start writing your note..."
         className="flex-1 w-full p-2 bg-transparent focus:outline-none resize-none dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
