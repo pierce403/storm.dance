@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "build:ci": "tsc -b --skipLibCheck && vite build",
     "lint": "eslint .",
+    "test": "vitest",
     "preview": "vite preview"
   },
   "dependencies": {

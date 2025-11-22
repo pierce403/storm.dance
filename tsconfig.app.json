@@ -12,8 +12,10 @@
     /* Tailwind stuff */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@xmtp/browser-sdk": ["./src/lib/xmtp-browser-sdk"]
     },
+    "types": ["vite/client"],
 
     /* Bundler mode */
     "moduleResolution": "node",
@@ -30,6 +32,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 

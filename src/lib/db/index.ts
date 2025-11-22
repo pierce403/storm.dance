@@ -322,6 +322,12 @@ export const dbService = {
     return updatedNote;
   },
 
+  async upsertExternalNote(note: Note): Promise<Note> {
+    const db = await this.getDb();
+    await db.put('notes', note);
+    return note;
+  },
+
   async deleteNote(id: string): Promise<boolean> {
     const db = await this.getDb();
     await db.delete('notes', id);

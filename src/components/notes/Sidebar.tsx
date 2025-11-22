@@ -2,9 +2,12 @@ import React, { useState, useEffect, useRef, RefObject, KeyboardEvent, forwardRe
 import { Plus, Trash2, Book, Loader2, ChevronRight, ChevronDown, Folder as FolderIcon, Edit2, Info, Key, AlertCircle, Download } from 'lucide-react';
 import { Note, Notebook, Folder, dbService } from '../../lib/db';
 import { XmtpConnect } from '../xmtp/XmtpConnect';
-import { Client } from '@xmtp/xmtp-js';
+import type { BrowserClient } from '@xmtp/browser-sdk';
 import { encryptBackup } from '../../lib/cryptoUtils';
 import { saveAs } from 'file-saver';
+import { NotebookCollaborationPanel } from './NotebookCollaborationPanel';
+import { CollaborationContact } from '@/lib/collaboration/types';
+import { CollaborationStatus } from '@/hooks/useNotebookCollaboration';
 
 // Define the handle type that will be exposed
 export interface SidebarHandle {
@@ -13,8 +16,8 @@ export interface SidebarHandle {
 
 interface SidebarProps {
   // Updated XMTP props
-  xmtpClient?: Client | null;
-  onXmtpConnected: (client: Client, address: string, env: 'dev' | 'production') => void;
+  xmtpClient?: BrowserClient | null;
+  onXmtpConnected: (client: BrowserClient, address: string, env: 'dev' | 'production') => void;
   onXmtpDisconnected: () => void;
   onXmtpError: (errorMessage: string) => void;
   initialXmtpNetworkEnv: 'dev' | 'production';
@@ -40,6 +43,18 @@ interface SidebarProps {
   isLoading: boolean;
   containerRef?: RefObject<HTMLDivElement>;
   editorTitleInputRef?: RefObject<HTMLInputElement>;
+
+  // Collaboration
+  collaborationContacts: CollaborationContact[];
+  collaborationStatus: CollaborationStatus;
+  collaborationTopic: string | null;
+  collaborationError?: string | null;
+  xmtpEnv: 'dev' | 'production';
+  isXmtpConnected: boolean;
+  onAddCollaborator: (value: string) => Promise<void>;
+  onRemoveCollaborator: (address: string) => void;
+  onStartCollaborating: (notebookId: string | null) => Promise<void>;
+  onStopCollaborating: () => Promise<void>;
 }
 
 // Wrap component with forwardRef
@@ -72,7 +87,17 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     onMoveFolder,
     isLoading,
     containerRef,
-    editorTitleInputRef
+    editorTitleInputRef,
+    collaborationContacts,
+    collaborationStatus,
+    collaborationTopic,
+    collaborationError,
+    xmtpEnv,
+    isXmtpConnected,
+    onAddCollaborator,
+    onRemoveCollaborator,
+    onStartCollaborating,
+    onStopCollaborating
   }, ref) => {
 
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
@@ -598,6 +623,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
 
   // Pass the xmtpClient to the connection status indicator
   const xmtpConnected = !!xmtpClient;
+  const selectedNotebook = notebooks.find(nb => nb.id === selectedNotebookId) || null;
 
   return (
     <div
@@ -616,6 +642,21 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
               triggerDisconnect={triggerXmtpDisconnect}
               isConnected={xmtpConnected}
             />
+        </div>
+        <div className="p-4 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
+          <NotebookCollaborationPanel
+            notebookName={selectedNotebook?.name}
+            contacts={collaborationContacts}
+            sessionTopic={collaborationTopic}
+            status={collaborationStatus}
+            error={collaborationError}
+            isXmtpConnected={isXmtpConnected}
+            onAddContact={onAddCollaborator}
+            onRemoveContact={onRemoveCollaborator}
+            onStartCollaboration={() => onStartCollaborating(selectedNotebookId)}
+            onStopCollaboration={onStopCollaborating}
+            xmtpEnv={xmtpEnv}
+          />
         </div>
         <div className="p-4 flex-col space-y-2 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
             <div className="flex justify-between items-center">

@@ -3,12 +3,14 @@ import { Sidebar, SidebarHandle } from './components/notes/Sidebar';
 import { Editor } from './components/notes/Editor';
 import { EditorTabs } from './components/notes/EditorTabs';
 import { Note, Notebook, Folder, dbService, DB_NAME } from './lib/db';
-import { Client } from '@xmtp/xmtp-js';
+import type { BrowserClient } from '@xmtp/browser-sdk';
 import { Key, AlertCircle } from 'lucide-react';
 import './App.css';
 import './DarkTheme.css';
 import { decryptBackup } from './lib/cryptoUtils';
 import { TopBar } from './components/TopBar';
+import { useNotebookCollaboration } from './hooks/useNotebookCollaboration';
+import type { CrdtUpdatePayload } from './lib/collaboration/types';
 
 // --- Types for Import --- 
 interface ExportedFolder {
@@ -81,10 +83,10 @@ function App() {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [openNoteIds, setOpenNoteIds] = useState<string[]>([]);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
-  const [xmtpClient, setXmtpClient] = useState<Client | null>(null);
+  const [xmtpClient, setXmtpClient] = useState<BrowserClient | null>(null);
   const [userAddress, setUserAddress] = useState<string | null>(null);
   const [xmtpStatus, setXmtpStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
-  const [xmtpNetworkEnv, setXmtpNetworkEnv] = useState<'dev' | 'production'>('production');
+  const [xmtpNetworkEnv, setXmtpNetworkEnv] = useState<'dev' | 'production'>('dev');
   const [isXmtpConnecting, setIsXmtpConnecting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isDbBlocked, setIsDbBlocked] = useState(false);
@@ -110,6 +112,52 @@ function App() {
     document.documentElement.setAttribute('data-theme', initialTheme);
     document.documentElement.classList.toggle('dark', initialTheme === 'dark');
   }, []);
+
+  const handleRemoteCrdtUpdate = useCallback(async (update: CrdtUpdatePayload) => {
+    if (!notebooks.some(nb => nb.id === update.notebookId)) {
+      return;
+    }
+
+    let noteForDb: Note | null = null;
+    setNotes((prevNotes) => {
+      const existing = prevNotes.find(n => n.id === update.noteId);
+      const merged: Note = existing
+        ? { ...existing, title: update.title, content: update.content, updatedAt: update.updatedAt }
+        : {
+            id: update.noteId,
+            notebookId: update.notebookId,
+            folderId: null,
+            title: update.title,
+            content: update.content,
+            createdAt: update.updatedAt,
+            updatedAt: update.updatedAt,
+          };
+
+      noteForDb = merged;
+      const filtered = prevNotes.filter(n => n.id !== update.noteId);
+      return [...filtered, merged].sort((a,b) => b.updatedAt - a.updatedAt);
+    });
+
+    if (noteForDb) {
+      await dbService.upsertExternalNote(noteForDb);
+    }
+  }, [notebooks]);
+
+  const {
+    contacts: collaborationContacts,
+    status: collaborationStatus,
+    sessionNotebookId,
+    sessionTopic,
+    error: collaborationError,
+    addContact,
+    removeContact,
+    startCollaboration,
+    stopCollaboration,
+    broadcastLocalUpdate,
+  } = useNotebookCollaboration({
+    client: xmtpClient,
+    onRemoteUpdate: handleRemoteCrdtUpdate,
+  });
 
   const notesColumnRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -303,6 +351,7 @@ function App() {
 
       if (updatedNote) {
         setNotes(notes.map(note => note.id === id ? updatedNote : note));
+        await broadcastLocalUpdate(updatedNote);
       }
     } catch (error) {
       console.error('Failed to update note:', error);
@@ -433,7 +482,7 @@ function App() {
     setXmtpStatus('connecting');
   };
 
-  const handleXmtpConnected = (client: Client, address: string, env: 'dev' | 'production') => {
+  const handleXmtpConnected = (client: BrowserClient, address: string, env: 'dev' | 'production') => {
     console.log("App: XMTP Connected", { address, env });
     setXmtpClient(client);
     setUserAddress(address);
@@ -448,6 +497,7 @@ function App() {
     setUserAddress(null);
     setXmtpStatus('disconnected');
     setIsXmtpConnecting(false);
+    stopCollaboration();
   };
 
   const handleXmtpError = (errorMessage: string) => {
@@ -700,6 +750,16 @@ function App() {
               isLoading={isLoading}
               containerRef={notesColumnRef}
               editorTitleInputRef={editorTitleInputRef}
+              collaborationContacts={collaborationContacts}
+              collaborationStatus={collaborationStatus}
+              collaborationTopic={sessionTopic}
+              collaborationError={collaborationError || undefined}
+              xmtpEnv={xmtpNetworkEnv}
+              isXmtpConnected={xmtpStatus === 'connected'}
+              onAddCollaborator={addContact}
+              onRemoveCollaborator={removeContact}
+              onStartCollaborating={(notebookId) => startCollaboration(notebookId || '')}
+              onStopCollaborating={stopCollaboration}
             />
           </div>
 
