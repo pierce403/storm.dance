@@ -8,30 +8,39 @@ setupPolyfills();
 // Ensure process is defined globally
 if (typeof window !== 'undefined') {
   if (!window.process) {
-    window.process = { env: {} };
+    window.process = { env: {} } as typeof window.process;
   }
   if (!window.process.env) {
     window.process.env = {};
   }
-  
+
   // Force explicit Buffer global definition
   if (typeof window.Buffer === 'undefined' || typeof window.Buffer.from !== 'function') {
-    console.warn("Buffer not properly defined, importing directly");
+    console.warn('Buffer not properly defined, importing directly');
     import('buffer').then(({ Buffer }) => {
       window.Buffer = Buffer;
-      console.log("Buffer loaded dynamically");
+      console.log('Buffer loaded dynamically');
     });
   }
 }
 
 // React imports only after polyfills
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import './index.css'
-import App from './App.tsx'
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import './index.css';
+import App from './App.tsx';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
   </StrictMode>,
-)
+);
+
+// Register service worker for PWA support
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('/sw.js')
+      .catch((error) => console.error('Service worker registration failed:', error));
+  });
+}

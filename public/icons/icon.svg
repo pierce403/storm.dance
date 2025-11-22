@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="storm.dance logo">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="4" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)" />
+  <path
+    d="M34 78c9.5-6 17.5-12.5 24-19.5 2.7-2.9 2.4-7.6-.5-10.2-2.6-2.3-6.6-2.1-9.2.3l-13 11.6c-1.6 1.4-4 .7-4.8-1.3-2.3-6 6.4-18 17.9-23.7 14.5-7.2 32.7-2 38.6 11.4 3 6.9 2.6 15.1-.8 21.7-6.3 12.1-21.7 24.6-35 32.2-2.8 1.6-6.3-.2-6.7-3.4l-.8-6.8c-.4-3.5-3.8-5.7-7.1-4.4l-8.7 3.4c-3.8 1.4-6.9-3.2-3.9-6.1Z"
+    fill="#0b1224"
+    fill-opacity="0.92"
+    filter="url(#glow)"
+  />
+</svg>
