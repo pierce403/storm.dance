@@ -25,6 +25,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "@xmtp/browser-sdk": path.resolve(__dirname, "./src/lib/xmtp-browser-sdk"),
       // Explicitly use browser-compatible versions
       "buffer": "buffer",
       "crypto": "crypto-browserify",
