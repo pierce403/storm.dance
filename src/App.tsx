@@ -104,10 +104,11 @@ function App() {
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme');
-    const initialTheme = savedTheme === 'dark' ? 'dark' : 
-                         (savedTheme === 'light' ? 'light' : 
+    const initialTheme = savedTheme === 'dark' ? 'dark' :
+                         (savedTheme === 'light' ? 'light' :
                          (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
     document.documentElement.setAttribute('data-theme', initialTheme);
+    document.documentElement.classList.toggle('dark', initialTheme === 'dark');
   }, []);
 
   const notesColumnRef = useRef<HTMLDivElement>(null);
@@ -511,6 +512,7 @@ function App() {
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
     localStorage.setItem('theme', theme);
   }, [theme]);
 
@@ -651,7 +653,7 @@ function App() {
   }
 
   return (
-    <div className={`flex flex-col h-screen bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 font-sans antialiased`}>
+    <div className="flex flex-col min-h-screen bg-transparent text-gray-900 dark:text-gray-100 font-sans antialiased px-3 pb-4 lg:px-6">
       <TopBar
         theme={theme}
         toggleTheme={toggleTheme}
@@ -664,11 +666,11 @@ function App() {
         onFileChange={handleFileChange}
         isImporting={isImporting}
       />
-      
-      <main className="flex-1 overflow-hidden">
-        <div className="flex h-full">
+
+      <main className="flex-1 overflow-hidden pt-2">
+        <div className="flex h-full flex-col gap-3 lg:flex-row lg:gap-4">
           <div
-            className="w-1/4 min-w-[200px] max-w-[300px] border-r border-gray-200 dark:border-gray-700 flex flex-col bg-gray-50 dark:bg-gray-900 !important"
+            className="w-full lg:w-1/3 xl:w-1/4 min-h-[38vh] lg:min-h-0 lg:max-w-[360px] border border-gray-200/70 dark:border-gray-800/70 flex flex-col bg-white/80 dark:bg-gray-950/70 rounded-2xl backdrop-blur mobile-card"
             onFocusCapture={() => setActiveColumn('notebooks')}
           >
             <Sidebar
@@ -700,39 +702,39 @@ function App() {
               editorTitleInputRef={editorTitleInputRef}
             />
           </div>
-          
-          <div 
-            className="flex-1 flex flex-col"
+
+          <div
+            className="flex-1 min-h-[50vh] lg:min-h-0 flex flex-col"
             ref={editorRef}
             tabIndex={0}
             onFocus={() => setActiveColumn('editor')}
           >
             {isLoading ? (
-                <div className="flex items-center justify-center h-full text-muted-foreground">
-                    Loading...
-                </div>
+              <div className="flex items-center justify-center h-full rounded-2xl border border-gray-200/70 dark:border-gray-800/70 bg-white/80 dark:bg-gray-900/80 mobile-card text-muted-foreground">
+                  Loading...
+              </div>
             ) : openNoteIds.length > 0 ? (
-                <>
-                    <EditorTabs 
-                        notes={notes}
-                        openNoteIds={openNoteIds}
-                        activeNoteId={activeNoteId}
-                        onSelectTab={setActiveNoteId}
-                        onCloseTab={handleCloseTab}
-                    />
-                    <div className="flex-1 overflow-auto scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 dark:scrollbar-thumb-gray-600 dark:hover:scrollbar-thumb-gray-500">
-                        <Editor
-                          note={activeNote}
-                          onUpdateNote={handleUpdateNote}
-                          titleInputRef={editorTitleInputRef}
-                          textAreaRef={editorTextAreaRef}
-                        />
-                    </div>
-                </>
+              <div className="flex h-full flex-col rounded-2xl border border-gray-200/70 dark:border-gray-800/70 bg-white/80 dark:bg-gray-900/80 shadow-lg shadow-gray-900/5 dark:shadow-black/20 backdrop-blur mobile-card">
+                  <EditorTabs
+                      notes={notes}
+                      openNoteIds={openNoteIds}
+                      activeNoteId={activeNoteId}
+                      onSelectTab={setActiveNoteId}
+                      onCloseTab={handleCloseTab}
+                  />
+                  <div className="flex-1 overflow-auto scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 dark:scrollbar-thumb-gray-600 dark:hover:scrollbar-thumb-gray-500 p-4 lg:p-6">
+                      <Editor
+                        note={activeNote}
+                        onUpdateNote={handleUpdateNote}
+                        titleInputRef={editorTitleInputRef}
+                        textAreaRef={editorTextAreaRef}
+                      />
+                  </div>
+              </div>
             ) : (
-                 <div className="flex items-center justify-center h-full text-gray-400 dark:text-gray-500">
-                    <p className="italic">Select a note to open it.</p>
-                </div>
+               <div className="flex items-center justify-center h-full rounded-2xl border border-gray-200/70 dark:border-gray-800/70 bg-white/80 dark:bg-gray-900/80 text-gray-500 dark:text-gray-400 mobile-card">
+                  <p className="italic">Select a note to open it.</p>
+              </div>
             )}
           </div>
         </div>
