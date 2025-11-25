@@ -53,3 +53,10 @@ Implementing inline action buttons (Edit, Delete, Info) within a clickable list 
 ### Sidebar Navigation
 - **Structure**: The sidebar uses a flexible layout with a fixed width on desktop and a drawer/sheet pattern on mobile.
 - **Scroll Areas**: `react-scroll-area` (Radix) is used to ensure custom scrollbar styling across browsers.
+
+### Keyboard Navigation
+- **Column Cycling**: Pressing `Tab` while focused on a column container (not inside an input/textarea/button) cycles focus across the Notebooks → Notes → Editor columns. This avoids hijacking `Tab` when users are typing or interacting with controls, keeping native form navigation intact.
+- **Focus Guards**: Editable surfaces (`input`, `textarea`, `select`, `button`, and `contenteditable`) bypass the custom handler so users can tab through form controls as expected.
+
+### Import Formats
+- Backup imports accept both encrypted (`.json.encrypted`) and plain JSON (`.json`) files. The file picker and validation surface a clear error if another extension is chosen.
