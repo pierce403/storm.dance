@@ -722,7 +722,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                     <Book className="h-4 w-4 mr-2 flex-shrink-0 text-gray-500 dark:text-gray-400" />
                     <span className="truncate flex-1 text-left">{notebook.name}</span>
                   </button>
-                  <div className={`absolute right-2 top-1/2 -translate-y-1/2 flex items-center space-x-2 transition-opacity bg-white dark:bg-gray-900 pl-3 pr-1 py-1 rounded-l-md shadow-[-12px_0_12px_-6px_rgba(255,255,255,1)] dark:shadow-[-12px_0_12px_-6px_rgba(17,24,39,1)] ${selectedNotebookId === notebook.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                  <div className={`absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2 transition-opacity bg-white dark:bg-gray-900 pl-3 pr-2 py-1 rounded-l-md shadow-[-12px_0_12px_-6px_rgba(255,255,255,1)] dark:shadow-[-12px_0_12px_-6px_rgba(17,24,39,1)] z-10 ${selectedNotebookId === notebook.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                     <button
                       className="p-1.5 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
                       onClick={(e) => { e.stopPropagation(); handleRenameNotebookClick(notebook); }}
