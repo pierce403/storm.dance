@@ -733,33 +733,39 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                     {/* Action Buttons - Visible on Hover or Selected */}
                     <div className={`flex items-center gap-1 pr-2 transition-opacity ${selectedNotebookId === notebook.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                       <button
-                        className="p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded hover:bg-gray-300 dark:hover:bg-gray-700"
+                        className="p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded hover:bg-gray-300 dark:hover:bg-gray-700 pointer-events-auto z-20"
                         onClick={(e) => {
                           e.stopPropagation();
+                          e.preventDefault();
                           handleRenameNotebookClick(notebook);
                         }}
+                        onMouseDown={(e) => e.stopPropagation()}
                         aria-label={`Rename notebook ${notebook.name}`}
                         title="Rename notebook"
                       >
                         <Edit2 size={14} />
                       </button>
                       <button
-                        className="p-1 text-gray-400 hover:text-red-600 dark:text-gray-500 dark:hover:text-red-400 focus:outline-none focus:ring-1 focus:ring-red-400 rounded hover:bg-gray-300 dark:hover:bg-gray-700"
+                        className="p-1 text-gray-400 hover:text-red-600 dark:text-gray-500 dark:hover:text-red-400 focus:outline-none focus:ring-1 focus:ring-red-400 rounded hover:bg-gray-300 dark:hover:bg-gray-700 pointer-events-auto z-20"
                         onClick={(e) => {
                           e.stopPropagation();
+                          e.preventDefault();
                           onDeleteNotebook(notebook.id);
                         }}
+                        onMouseDown={(e) => e.stopPropagation()}
                         aria-label={`Delete notebook ${notebook.name}`}
                         title="Delete notebook"
                       >
                         <Trash2 size={14} />
                       </button>
                       <button
-                        className="p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded hover:bg-gray-300 dark:hover:bg-gray-700"
+                        className="p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded hover:bg-gray-300 dark:hover:bg-gray-700 pointer-events-auto z-20"
                         onClick={(e) => {
                           e.stopPropagation();
+                          e.preventDefault();
                           setInfoModalNotebook(notebook);
                         }}
+                        onMouseDown={(e) => e.stopPropagation()}
                         aria-label={`Show info for notebook ${notebook.name}`}
                         title="Show notebook info"
                       >
