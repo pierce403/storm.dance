@@ -178,6 +178,33 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     }
   };
 
+  const handleRenameNotebookClick = (notebook: Notebook) => {
+    setRenamingNotebookId(notebook.id);
+    setNotebookNewName(notebook.name);
+  };
+
+  const handleRenameNotebookSubmit = async (e: React.FormEvent | React.FocusEvent) => {
+    e.preventDefault();
+    if (!renamingNotebookId || !notebookNewName.trim()) {
+      setRenamingNotebookId(null);
+      return;
+    }
+    const originalNotebook = notebooks.find(n => n.id === renamingNotebookId);
+    if (originalNotebook && originalNotebook.name === notebookNewName.trim()) {
+      setRenamingNotebookId(null);
+      return;
+    }
+
+    try {
+      await onRenameNotebook(renamingNotebookId, notebookNewName.trim());
+      setRenamingNotebookId(null);
+      setNotebookNewName('');
+    } catch (error) {
+      console.error('Failed to rename notebook:', error);
+      setRenamingNotebookId(null);
+    }
+  };
+
   const toggleFolder = (folderId: string) => {
     setExpandedFolders(prev => {
       const newSet = new Set(prev);
@@ -695,33 +722,33 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                     <Book className="h-4 w-4 mr-2 flex-shrink-0 text-gray-500 dark:text-gray-400" />
                     <span className="truncate flex-1 text-left">{notebook.name}</span>
                   </button>
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-gray-900 pl-2 shadow-[-10px_0_10px_-5px_rgba(255,255,255,1)] dark:shadow-[-10px_0_10px_-5px_rgba(17,24,39,1)]">
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-gray-900 pl-3 pr-1 py-1 rounded-l-md shadow-[-12px_0_12px_-6px_rgba(255,255,255,1)] dark:shadow-[-12px_0_12px_-6px_rgba(17,24,39,1)]">
                     <button
-                      className="p-1.5 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded"
+                      className="p-1.5 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
                       onClick={(e) => { e.stopPropagation(); handleRenameNotebookClick(notebook); }}
                       aria-label={`Rename notebook ${notebook.name}`}
                       title="Rename notebook"
                       tabIndex={-1}
                     >
-                      <Edit2 size={14} />
+                      <Edit2 size={15} />
                     </button>
                     <button
-                      className="p-1.5 text-gray-400 hover:text-red-600 dark:text-gray-500 dark:hover:text-red-400 focus:outline-none focus:ring-1 focus:ring-red-400 rounded"
+                      className="p-1.5 text-gray-400 hover:text-red-600 dark:text-gray-500 dark:hover:text-red-400 focus:outline-none focus:ring-1 focus:ring-red-400 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
                       onClick={(e) => { e.stopPropagation(); onDeleteNotebook(notebook.id); }}
                       aria-label={`Delete notebook ${notebook.name}`}
                       title="Delete notebook"
                       tabIndex={-1}
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={15} />
                     </button>
                     <button
-                      className="p-1.5 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded"
+                      className="p-1.5 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
                       onClick={(e) => { e.stopPropagation(); setInfoModalNotebook(notebook); }}
                       aria-label={`Show info for notebook ${notebook.name}`}
                       title="Show notebook info"
                       tabIndex={-1}
                     >
-                      <Info size={14} />
+                      <Info size={15} />
                     </button>
                   </div>
                 </>
