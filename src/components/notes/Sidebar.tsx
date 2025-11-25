@@ -713,58 +713,63 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                 </form>
               ) : (
                 <>
-                  <button
-                    className={`w-full flex items-center px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-yellow-400 ${selectedNotebookId === notebook.id ? "bg-gray-200 dark:bg-yellow-900/30 font-medium dark:text-yellow-100" : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
+                  <div
+                    className={`relative w-full flex items-center px-3 py-2 rounded-md text-sm group cursor-pointer ${selectedNotebookId === notebook.id ? "bg-gray-200 dark:bg-yellow-900/30 font-medium dark:text-yellow-100" : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
                     onClick={() => onSelectNotebook(notebook.id)}
-                    tabIndex={-1}
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onSelectNotebook(notebook.id);
+                      }
+                    }}
                     data-notebook-id={notebook.id}
                   >
                     <Book className="h-4 w-4 mr-2 flex-shrink-0 text-gray-500 dark:text-gray-400" />
-                    <span className="truncate flex-1 text-left">{notebook.name}</span>
-                  </button>
-                  <div className={`absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2 w-auto transition-opacity bg-white dark:bg-gray-900 pl-3 pr-2 py-1 rounded-l-md shadow-[-12px_0_12px_-6px_rgba(255,255,255,1)] dark:shadow-[-12px_0_12px_-6px_rgba(17,24,39,1)] z-10 ${selectedNotebookId === notebook.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                    <button
-                      className="p-1.5 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handleRenameNotebookClick(notebook);
-                      }}
-                      onMouseDown={(e) => e.stopPropagation()}
-                      aria-label={`Rename notebook ${notebook.name}`}
-                      title="Rename notebook"
-                      tabIndex={0}
-                    >
-                      <Edit2 size={15} />
-                    </button>
-                    <button
-                      className="p-1.5 text-gray-400 hover:text-red-600 dark:text-gray-500 dark:hover:text-red-400 focus:outline-none focus:ring-1 focus:ring-red-400 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onDeleteNotebook(notebook.id);
-                      }}
-                      onMouseDown={(e) => e.stopPropagation()}
-                      aria-label={`Delete notebook ${notebook.name}`}
-                      title="Delete notebook"
-                      tabIndex={0}
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                    <button
-                      className="p-1.5 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setInfoModalNotebook(notebook);
-                      }}
-                      onMouseDown={(e) => e.stopPropagation()}
-                      aria-label={`Show info for notebook ${notebook.name}`}
-                      title="Show notebook info"
-                      tabIndex={0}
-                    >
-                      <Info size={15} />
-                    </button>
+                    <span className="truncate flex-1 text-left mr-2">{notebook.name}</span>
+
+                    {/* Action Buttons - Visible on Hover or Selected */}
+                    <div className={`flex items-center gap-1 transition-opacity ${selectedNotebookId === notebook.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                      <button
+                        className="p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded hover:bg-gray-300 dark:hover:bg-gray-700"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleRenameNotebookClick(notebook);
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        aria-label={`Rename notebook ${notebook.name}`}
+                        title="Rename notebook"
+                      >
+                        <Edit2 size={14} />
+                      </button>
+                      <button
+                        className="p-1 text-gray-400 hover:text-red-600 dark:text-gray-500 dark:hover:text-red-400 focus:outline-none focus:ring-1 focus:ring-red-400 rounded hover:bg-gray-300 dark:hover:bg-gray-700"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onDeleteNotebook(notebook.id);
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        aria-label={`Delete notebook ${notebook.name}`}
+                        title="Delete notebook"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                      <button
+                        className="p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded hover:bg-gray-300 dark:hover:bg-gray-700"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setInfoModalNotebook(notebook);
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        aria-label={`Show info for notebook ${notebook.name}`}
+                        title="Show notebook info"
+                      >
+                        <Info size={14} />
+                      </button>
+                    </div>
                   </div>
                 </>
               )}
