@@ -217,23 +217,46 @@ function App() {
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: globalThis.KeyboardEvent) => {
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        const shiftPressed = e.shiftKey;
-        let nextColumn: 'notebooks' | 'notes' | 'editor' | null = null;
+      if (e.key !== 'Tab') return;
 
-        if (shiftPressed) {
-          if (activeColumn === 'editor') nextColumn = 'notes';
-          else if (activeColumn === 'notes') nextColumn = 'notebooks';
-          else if (activeColumn === 'notebooks') nextColumn = 'editor';
+      const target = e.target as HTMLElement | null;
+      const isTextEntry = target ?
+        ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(target.tagName) || target.isContentEditable || target.getAttribute('role') === 'textbox'
+        : false;
+
+      if (isTextEntry) {
+        return; // Preserve native tab order when editing or interacting with controls
+      }
+
+      e.preventDefault();
+      const shiftPressed = e.shiftKey;
+      let nextColumn: 'notebooks' | 'notes' | 'editor' | null = null;
+
+      if (shiftPressed) {
+        if (activeColumn === 'editor') nextColumn = 'notes';
+        else if (activeColumn === 'notes') nextColumn = 'notebooks';
+        else if (activeColumn === 'notebooks') nextColumn = 'editor';
+      } else {
+        if (activeColumn === 'notebooks') nextColumn = 'notes';
+        else if (activeColumn === 'notes') nextColumn = 'editor';
+        else if (activeColumn === 'editor') nextColumn = 'notebooks';
+      }
+
+      if (!nextColumn) return;
+
+      setActiveColumn(nextColumn);
+      if (nextColumn === 'notebooks') {
+        const targetButton = notebooksListRef.current?.querySelector(
+          selectedNotebookId ? `button[data-notebook-id="${selectedNotebookId}"]` : 'button'
+        ) as HTMLButtonElement | null;
+        targetButton?.focus();
+      } else if (nextColumn === 'notes') {
+        sidebarRef.current?.focusItem(activeNoteId ? 'note' : 'folder', activeNoteId);
+      } else if (nextColumn === 'editor') {
+        if (activeNote) {
+          editorTitleInputRef.current?.focus() || editorTextAreaRef.current?.focus();
         } else {
-          if (activeColumn === 'notebooks') nextColumn = 'notes';
-          else if (activeColumn === 'notes') nextColumn = 'editor';
-          else if (activeColumn === 'editor') nextColumn = 'notebooks';
-        }
-
-        if (nextColumn) {
-          focusColumn(nextColumn);
+          editorRef.current?.focus();
         }
       }
     };
@@ -242,25 +265,7 @@ function App() {
     return () => {
       document.removeEventListener('keydown', handleGlobalKeyDown);
     };
-  }, [activeColumn, selectedNotebookId, activeNoteId]);
-
-  const focusColumn = (column: 'notebooks' | 'notes' | 'editor') => {
-    setActiveColumn(column);
-    if (column === 'notebooks') {
-      const targetButton = notebooksListRef.current?.querySelector(
-        selectedNotebookId ? `button[data-notebook-id="${selectedNotebookId}"]` : 'button'
-      ) as HTMLButtonElement | null;
-      targetButton?.focus();
-    } else if (column === 'notes') {
-      sidebarRef.current?.focusItem(activeNoteId ? 'note' : 'folder', activeNoteId);
-    } else if (column === 'editor') {
-      if (activeNote) {
-        editorTitleInputRef.current?.focus() || editorTextAreaRef.current?.focus();
-      } else {
-        editorRef.current?.focus();
-      }
-    }
-  };
+  }, [activeColumn, activeNote, activeNoteId, selectedNotebookId]);
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -605,8 +610,9 @@ function App() {
     const file = event.target.files?.[0];
     if (file) {
       // Basic validation
-      if (!file.name.toLowerCase().endsWith('.json.encrypted') && !file.name.toLowerCase().endsWith('.json')) {
-        showToast('Error', 'Invalid file type. Please select a .json.encrypted file.', 'destructive');
+      const fileName = file.name.toLowerCase();
+      if (!fileName.endsWith('.json.encrypted') && !fileName.endsWith('.json')) {
+        showToast('Error', 'Invalid file type. Please select a .json or .json.encrypted file.', 'destructive');
         event.target.value = '';
         return;
       }
