@@ -1,7 +1,7 @@
 import type { Conversation, DecodedMessage, Identifier } from '@xmtp/browser-sdk';
 import { buildNotebookTopic } from '../xmtp-browser-sdk';
 import { NotebookCrdtClock, buildUpdatePayload } from './crdt';
-import { CollaborationContact, CrdtUpdatePayload } from './types';
+import { CollaborationContact, CrdtUpdatePayload, InvitePayload, CollaborationMessage } from './types';
 
 export interface NoteShape {
   id: string;
@@ -17,6 +17,7 @@ interface ConversationFactory {
 
 export interface XmtpClientLike {
   inboxId: string | undefined;
+  address: string | undefined; // Add address
   canMessage: (identifiers: Identifier[]) => Promise<Map<string, boolean>>;
   conversations: ConversationFactory;
 }
@@ -41,7 +42,7 @@ export class NotebookCollaborationSession {
     this.topic = buildNotebookTopic(params.notebookId);
   }
 
-  async start(contacts: CollaborationContact[]) {
+  async start(contacts: CollaborationContact[], notebookName: string) {
     this.running = true;
     this.streamAbort = false;
     this.sessionToken += 1;
@@ -50,20 +51,18 @@ export class NotebookCollaborationSession {
     const created = await Promise.all(
       validContacts.map(async (contact) => {
         const identifier: Identifier = { identifierKind: 'Ethereum' as const, identifier: contact.address };
-        // Note: v5 newDmWithIdentifier options might not support conversationId or metadata directly in the same way?
-        // Checking index.d.ts: newDmWithIdentifier(identifier: Identifier, options?: SafeCreateDmOptions)
-        // SafeCreateDmOptions = { messageDisappearingSettings?: ... }
-        // It seems custom metadata or conversationId (topic) might not be supported for DMs in v5 the same way?
-        // DMs are deterministic by participants.
-        // If we need a specific topic, we might need to use Groups or just use the default DM and filter messages by content/metadata?
-        // But the previous code used `conversationId: this.topic`.
-        // If we can't set conversationId, we can't separate notebook sessions easily?
-        // Wait, XMTP v3 DMs are just DMs.
-        // Maybe we should filter messages by `notebookId` in the payload?
-        // The payload already has `notebookId`.
-        // So we can just use the DM.
-
         const conversation = await this.client.conversations.newDmWithIdentifier(identifier);
+
+        // Send invite
+        const invitePayload: InvitePayload = {
+          notebookId: this.notebookId,
+          notebookName: notebookName,
+          inviterName: 'User', // TODO: Get actual user name if available
+          inviterAddress: this.client.address || '', // Fallback or ensure address is available
+        };
+        const inviteMsg: CollaborationMessage = { type: 'invite', payload: invitePayload };
+        await conversation.send(JSON.stringify(inviteMsg));
+
         this.startStream(conversation, token);
         return [contact.address, conversation] as const;
       })
@@ -107,8 +106,6 @@ export class NotebookCollaborationSession {
       const canMessageMap = await this.client.canMessage(identifiers);
 
       return contacts.filter(c => {
-        // canMessageMap keys are string representation of identifier? or just the identifier string?
-        // Usually it's the address string for Ethereum identifiers.
         return canMessageMap.get(c.address) ?? false;
       });
     } catch (e) {
@@ -120,12 +117,9 @@ export class NotebookCollaborationSession {
   private async startStream(conversation: Conversation, token: number) {
     const selfInboxId = this.client.inboxId;
 
-    // v5 stream() takes a callback
     // Cast conversation to any to avoid type mismatch if Conversation type is from wasm-bindings
     await (conversation as any).stream((error: Error | null, message: DecodedMessage | undefined) => {
       if (this.streamAbort || token !== this.sessionToken) {
-        // How to stop stream? The stream method returns a StreamCloser (function)
-        // But here we are awaiting it? No, stream() returns Promise<StreamCloser>
         return;
       }
       if (error || !message) return;
@@ -133,7 +127,6 @@ export class NotebookCollaborationSession {
       if (message.senderInboxId === selfInboxId) return;
       this.processMessage(message);
     }, () => {
-      // onFail
       console.log("Stream failed");
     });
   }
@@ -141,13 +134,20 @@ export class NotebookCollaborationSession {
   private async processMessage(message: DecodedMessage) {
     try {
       const raw = typeof message.content === 'string' ? message.content : String(message.content);
-      const parsed = JSON.parse(raw);
-      if (parsed?.type !== 'crdt-update' || !parsed.payload) return;
-      const payload: CrdtUpdatePayload = parsed.payload;
-      if (payload.notebookId !== this.notebookId) return;
-      if (!this.clock.shouldApply(payload)) return;
-      this.clock.record(payload);
-      await this.onRemoteUpdate(payload);
+      const parsed = JSON.parse(raw) as CollaborationMessage;
+
+      if (parsed.type === 'invite') {
+        // Ignore invites in the active session processor
+        return;
+      }
+
+      if (parsed.type === 'crdt-update') {
+        const payload = parsed.payload;
+        if (payload.notebookId !== this.notebookId) return;
+        if (!this.clock.shouldApply(payload)) return;
+        this.clock.record(payload);
+        await this.onRemoteUpdate(payload);
+      }
     } catch (err) {
       console.warn('Failed to process XMTP message', err);
     }

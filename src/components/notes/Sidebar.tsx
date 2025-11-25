@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useRef, RefObject, KeyboardEvent, forwardRef, useImperativeHandle } from 'react';
-import { Plus, Trash2, Book, Loader2, ChevronRight, ChevronDown, Folder as FolderIcon, Edit2, Info, Key, AlertCircle, Download } from 'lucide-react';
+import { Plus, Trash2, Book, Loader2, ChevronRight, ChevronDown, Folder as FolderIcon, Edit2, Info, Key, AlertCircle, Download, Users } from 'lucide-react';
 import { Note, Notebook, Folder, dbService } from '../../lib/db';
 import { XmtpConnect } from '../xmtp/XmtpConnect';
 import type { BrowserClient } from '@/lib/xmtp-browser-sdk';
 import { encryptBackup } from '../../lib/cryptoUtils';
 import { saveAs } from 'file-saver';
-import { NotebookCollaborationPanel } from './NotebookCollaborationPanel';
+import { NotebookCollaborationPanel } from './NotebookCollaborationPanel'; // Can remove if unused
+import { CollaborationManagerModal } from '@/components/collaboration/CollaborationManagerModal';
 import { CollaborationContact } from '@/lib/collaboration/types';
 import { CollaborationStatus } from '@/hooks/useNotebookCollaboration';
+import { CreateNotebookModal } from './CreateNotebookModal';
 
 // Define the handle type that will be exposed
 export interface SidebarHandle {
@@ -37,6 +39,8 @@ interface SidebarProps {
   onCreateFolder: (name: string, parentFolderId: string | null) => Promise<void>;
   onDeleteFolder: (folderId: string) => Promise<void>;
   onUpdateFolder: (folderId: string, updates: Partial<Omit<Folder, 'id' | 'createdAt' | 'updatedAt' | 'notebookId'>>) => Promise<void>;
+  onCreateNotebook: (name: string) => Promise<void>;
+  onRenameNotebook: (notebookId: string, newName: string) => Promise<void>;
   onDeleteNotebook: (notebookId: string | null) => Promise<void>;
   onMoveNoteToFolder: (noteId: string, folderId: string | null) => Promise<void>;
   onMoveFolder: (folderId: string, targetParentFolderId: string | null) => Promise<void>;
@@ -53,7 +57,7 @@ interface SidebarProps {
   isXmtpConnected: boolean;
   onAddCollaborator: (value: string) => Promise<void>;
   onRemoveCollaborator: (address: string) => void;
-  onStartCollaborating: (notebookId: string | null) => Promise<void>;
+  onStartCollaborating: (notebookId: string | null, notebookName: string) => Promise<void>;
   onStopCollaborating: () => Promise<void>;
 }
 
@@ -82,6 +86,8 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     onCreateFolder,
     onDeleteFolder,
     onUpdateFolder,
+    onCreateNotebook,
+    onRenameNotebook,
     onDeleteNotebook,
     onMoveNoteToFolder,
     onMoveFolder,
@@ -110,6 +116,10 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [folderNewName, setFolderNewName] = useState('');
   const [infoModalNotebook, setInfoModalNotebook] = useState<Notebook | null>(null);
+  const [isCollaborationModalOpen, setIsCollaborationModalOpen] = useState(false);
+  const [isCreateNotebookModalOpen, setIsCreateNotebookModalOpen] = useState(false);
+  const [renamingNotebookId, setRenamingNotebookId] = useState<string | null>(null);
+  const [notebookNewName, setNotebookNewName] = useState('');
 
   // Refs for focusable elements (folders and notes)
   const itemRefs = useRef<Map<string, HTMLElement>>(new Map());
@@ -631,68 +641,91 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
       tabIndex={-1}
       className="h-full flex flex-col border-r focus:outline-none"
     >
-      {/* XMTP Connect Section */}
-      <div className="p-4 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
-        <XmtpConnect
-          onConnect={onXmtpConnected}
-          onDisconnect={onXmtpDisconnected}
-          onError={onXmtpError}
-          initialNetworkEnv={initialXmtpNetworkEnv}
-          triggerConnect={triggerXmtpConnect}
-          triggerDisconnect={triggerXmtpDisconnect}
-          isConnected={xmtpConnected}
-        />
-      </div>
-      <div className="p-4 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
-        <NotebookCollaborationPanel
-          notebookName={selectedNotebook?.name}
-          contacts={collaborationContacts}
-          sessionTopic={collaborationTopic}
-          status={collaborationStatus}
-          error={collaborationError}
-          isXmtpConnected={isXmtpConnected}
-          onAddContact={onAddCollaborator}
-          onRemoveContact={onRemoveCollaborator}
-          onStartCollaboration={() => onStartCollaborating(selectedNotebookId)}
-          onStopCollaboration={onStopCollaborating}
-          xmtpEnv={xmtpEnv}
-        />
-      </div>
+
       <div className="p-4 flex-col space-y-2 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
         <div className="flex justify-between items-center">
           <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Notebooks</h2>
-          <button
-            className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-yellow-400"
-            onClick={() => { /* TODO: Implement create notebook UI */ }}
-            aria-label="Create new notebook"
-            tabIndex={-1}
-          >
-            <Plus className="h-5 w-5" />
-          </button>
+          <div className="flex space-x-1">
+            <button
+              className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-yellow-400 text-gray-600 dark:text-gray-400"
+              onClick={() => setIsCollaborationModalOpen(true)}
+              aria-label="Collaborate"
+              title="Collaborate"
+              tabIndex={-1}
+            >
+              <Users className="h-5 w-5" />
+            </button>
+            <button
+              className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-yellow-400"
+              onClick={() => setIsCreateNotebookModalOpen(true)}
+              aria-label="Create new notebook"
+              tabIndex={-1}
+            >
+              <Plus className="h-5 w-5" />
+            </button>
+          </div>
         </div>
         {/* Notebook List */}
         <ul className="space-y-1 mt-2">
           {notebooks.map((notebook) => (
-            <li key={notebook.id} className="relative">
-              <button
-                className={`w-full flex items-center px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-yellow-400 ${selectedNotebookId === notebook.id ? "bg-gray-200 dark:bg-yellow-900/30 font-medium dark:text-yellow-100" : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
-                onClick={() => onSelectNotebook(notebook.id)}
-                tabIndex={-1}
-                data-notebook-id={notebook.id}
-              >
-                <Book className="h-4 w-4 mr-2 flex-shrink-0 text-gray-500 dark:text-gray-400" />
-                <span className="truncate flex-1 text-left">{notebook.name}</span>
-              </button>
-              {/* Info Button */}
-              <button
-                className="p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded absolute right-2 top-1/2 -translate-y-1/2"
-                onClick={(e) => { e.stopPropagation(); setInfoModalNotebook(notebook); }}
-                aria-label={`Show info for notebook ${notebook.name}`}
-                title="Show notebook info"
-                tabIndex={-1} // Keep non-tabbable if main button is focus target
-              >
-                <Info size={14} />
-              </button>
+            <li key={notebook.id} className="relative group">
+              {renamingNotebookId === notebook.id ? (
+                <form onSubmit={handleRenameNotebookSubmit} className="w-full px-3 py-2">
+                  <input
+                    type="text"
+                    value={notebookNewName}
+                    onChange={(e) => setNotebookNewName(e.target.value)}
+                    className="w-full p-1 text-sm bg-white dark:bg-gray-800 border border-yellow-400 rounded-sm focus:outline-none dark:text-gray-100"
+                    autoFocus
+                    onBlur={handleRenameNotebookSubmit}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') { e.stopPropagation(); setRenamingNotebookId(null); }
+                      if (e.key === 'Enter') { e.stopPropagation(); handleRenameNotebookSubmit(e); }
+                    }}
+                  />
+                </form>
+              ) : (
+                <>
+                  <button
+                    className={`w-full flex items-center px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-yellow-400 ${selectedNotebookId === notebook.id ? "bg-gray-200 dark:bg-yellow-900/30 font-medium dark:text-yellow-100" : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
+                    onClick={() => onSelectNotebook(notebook.id)}
+                    tabIndex={-1}
+                    data-notebook-id={notebook.id}
+                  >
+                    <Book className="h-4 w-4 mr-2 flex-shrink-0 text-gray-500 dark:text-gray-400" />
+                    <span className="truncate flex-1 text-left">{notebook.name}</span>
+                  </button>
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-gray-900 pl-2 shadow-[-10px_0_10px_-5px_rgba(255,255,255,1)] dark:shadow-[-10px_0_10px_-5px_rgba(17,24,39,1)]">
+                    <button
+                      className="p-1.5 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded"
+                      onClick={(e) => { e.stopPropagation(); handleRenameNotebookClick(notebook); }}
+                      aria-label={`Rename notebook ${notebook.name}`}
+                      title="Rename notebook"
+                      tabIndex={-1}
+                    >
+                      <Edit2 size={14} />
+                    </button>
+                    <button
+                      className="p-1.5 text-gray-400 hover:text-red-600 dark:text-gray-500 dark:hover:text-red-400 focus:outline-none focus:ring-1 focus:ring-red-400 rounded"
+                      onClick={(e) => { e.stopPropagation(); onDeleteNotebook(notebook.id); }}
+                      aria-label={`Delete notebook ${notebook.name}`}
+                      title="Delete notebook"
+                      tabIndex={-1}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                    <button
+                      className="p-1.5 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded"
+                      onClick={(e) => { e.stopPropagation(); setInfoModalNotebook(notebook); }}
+                      aria-label={`Show info for notebook ${notebook.name}`}
+                      title="Show notebook info"
+                      tabIndex={-1}
+                    >
+                      <Info size={14} />
+                    </button>
+                  </div>
+                </>
+              )}
             </li>
           ))}
         </ul>
@@ -785,11 +818,33 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
         </div>
       </div>
 
-      {/* Render Modal */}
+      {/* Render Modals */}
       <NotebookInfoModal
         notebook={infoModalNotebook}
         onClose={() => setInfoModalNotebook(null)}
         onDelete={onDeleteNotebook}
+      />
+
+      <CreateNotebookModal
+        isOpen={isCreateNotebookModalOpen}
+        onClose={() => setIsCreateNotebookModalOpen(false)}
+        onCreate={onCreateNotebook}
+      />
+
+      <CollaborationManagerModal
+        isOpen={isCollaborationModalOpen}
+        onClose={() => setIsCollaborationModalOpen(false)}
+        notebookName={selectedNotebook?.name}
+        contacts={collaborationContacts}
+        sessionTopic={collaborationTopic}
+        status={collaborationStatus}
+        error={collaborationError}
+        isXmtpConnected={isXmtpConnected}
+        onAddContact={onAddCollaborator}
+        onRemoveContact={onRemoveCollaborator}
+        onStartCollaboration={() => onStartCollaborating(selectedNotebookId, selectedNotebook?.name || 'Untitled Notebook')}
+        onStopCollaboration={onStopCollaborating}
+        xmtpEnv={xmtpEnv}
       />
 
     </div>

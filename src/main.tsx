@@ -19,7 +19,6 @@ if (typeof window !== 'undefined') {
     console.warn('Buffer not properly defined, importing directly');
     import('buffer').then(({ Buffer }) => {
       window.Buffer = Buffer;
-      console.log('Buffer loaded dynamically');
     });
   }
 }

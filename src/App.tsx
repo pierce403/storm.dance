@@ -154,8 +154,13 @@ function App() {
     startCollaboration,
     stopCollaboration,
     broadcastLocalUpdate,
+    inviteModalOpen,
+    inviteDetails,
+    acceptInvite,
+    rejectInvite,
   } = useNotebookCollaboration({
     client: xmtpClient,
+    userAddress: userAddress,
     onRemoteUpdate: handleRemoteCrdtUpdate,
   });
 
@@ -517,6 +522,31 @@ function App() {
     setTimeout(() => handleXmtpConnectAttempt(), 100);
   };
 
+  const handleCreateNotebook = async (name: string) => {
+    try {
+      const newNotebook = await dbService.createNotebook({ name });
+      setNotebooks(prev => [...prev, newNotebook]);
+      setSelectedNotebookId(newNotebook.id);
+      showToast('Success', `Notebook "${name}" created`);
+    } catch (error) {
+      console.error('Failed to create notebook:', error);
+      showToast('Error', 'Failed to create notebook', 'destructive');
+    }
+  };
+
+  const handleRenameNotebook = async (notebookId: string, newName: string) => {
+    try {
+      const updatedNotebook = await dbService.updateNotebook(notebookId, { name: newName });
+      if (updatedNotebook) {
+        setNotebooks(prev => prev.map(nb => nb.id === notebookId ? updatedNotebook : nb));
+        showToast('Success', 'Notebook renamed');
+      }
+    } catch (error) {
+      console.error('Failed to rename notebook:', error);
+      showToast('Error', 'Failed to rename notebook', 'destructive');
+    }
+  };
+
   // --- Notebook Deletion --- 
   const handleDeleteNotebook = async (notebookId: string | null) => {
     if (!notebookId) return;
@@ -685,7 +715,7 @@ function App() {
         <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-xl text-center">
           <h2 className="text-xl font-bold mb-4">Database Update Required</h2>
           <p className="mb-6 text-gray-700 dark:text-gray-300">
-            storm.dance needs to update its database schema, but another tab might be blocking it.
+            STORMDANCE needs to update its database schema, but another tab might be blocking it.
             Please close any other open tabs running this application.
           </p>
           <p className="mb-6 text-gray-700 dark:text-gray-300">
@@ -715,6 +745,7 @@ function App() {
         onXmtpToggleNetwork={handleXmtpToggleNetwork}
         onFileChange={handleFileChange}
         isImporting={isImporting}
+        connectedNotebooksCount={notebooks.filter(nb => !!nb.xmtpTopic).length}
       />
 
       <main className="flex-1 overflow-hidden pt-2">
@@ -744,6 +775,8 @@ function App() {
               onCreateFolder={handleCreateFolder}
               onDeleteFolder={handleDeleteFolder}
               onUpdateFolder={handleUpdateFolder}
+              onCreateNotebook={handleCreateNotebook}
+              onRenameNotebook={handleRenameNotebook}
               onDeleteNotebook={handleDeleteNotebook}
               onMoveNoteToFolder={handleMoveNoteToFolder}
               onMoveFolder={handleMoveFolder}
@@ -758,7 +791,7 @@ function App() {
               isXmtpConnected={xmtpStatus === 'connected'}
               onAddCollaborator={addContact}
               onRemoveCollaborator={removeContact}
-              onStartCollaborating={(notebookId) => startCollaboration(notebookId || '')}
+              onStartCollaborating={(notebookId, notebookName) => startCollaboration(notebookId || '', notebookName)}
               onStopCollaborating={stopCollaboration}
             />
           </div>
@@ -810,8 +843,8 @@ function App() {
 
       {toastMessage && (
         <div className={`fixed bottom-4 right-4 p-4 rounded-md shadow-lg text-white ${toastMessage.variant === 'destructive'
-            ? 'bg-red-600 dark:bg-red-700'
-            : 'bg-green-600 dark:bg-green-700'
+          ? 'bg-red-600 dark:bg-red-700'
+          : 'bg-green-600 dark:bg-green-700'
           }`}>
           <h3 className="font-bold">{toastMessage.title}</h3>
           <p>{toastMessage.description}</p>

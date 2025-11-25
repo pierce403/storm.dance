@@ -1,6 +1,6 @@
 {
-  "name": "storm.dance",
-  "short_name": "storm",
+  "name": "STORMDANCE",
+  "short_name": "STORMDANCE",
   "description": "Encrypted notebooks that sync over XMTP, now installable as a PWA.",
   "start_url": "/",
   "display": "standalone",
@@ -8,7 +8,7 @@
   "theme_color": "#0f172a",
   "icons": [
     {
-      "src": "/icons/icon.svg",
+      "src": "/logo.svg",
       "sizes": "any",
       "type": "image/svg+xml"
     }

@@ -16,6 +16,7 @@ interface XmtpConnectionModalProps {
     onToggleNetwork: () => void;
     address?: string;
     errorMsg?: string | null;
+    connectedNotebooksCount: number;
 }
 
 export function XmtpConnectionModal({
@@ -28,6 +29,7 @@ export function XmtpConnectionModal({
     onToggleNetwork,
     address,
     errorMsg,
+    connectedNotebooksCount,
 }: XmtpConnectionModalProps) {
     const isConnecting = status === 'connecting';
     const isConnected = status === 'connected';
@@ -71,10 +73,14 @@ export function XmtpConnectionModal({
                         </div>
                         {address && (
                             <div className="flex flex-col space-y-1 mt-2">
-                                <span className="text-xs text-muted-foreground">Wallet Address</span>
+                                <span className="text-xs text-muted-foreground">Connected Identity</span>
                                 <code className="text-xs bg-muted p-1 rounded break-all">{address}</code>
                             </div>
                         )}
+                        <div className="flex justify-between items-center mt-2">
+                            <span className="text-sm">Connected Notebooks</span>
+                            <span className="font-medium">{connectedNotebooksCount}</span>
+                        </div>
                         {errorMsg && (
                             <div className="text-xs text-red-500 mt-2">
                                 {errorMsg}

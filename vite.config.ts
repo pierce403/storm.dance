@@ -40,6 +40,7 @@ export default defineConfig({
       }
     }
   },
+  assetsInclude: ['**/*.wasm'],
   build: {
     commonjsOptions: {
       transformMixedEsModules: true,

@@ -10,6 +10,7 @@ interface XmtpStatusIndicatorProps {
   onConnect: () => void;
   onDisconnect: () => void;
   onToggleNetwork: () => void;
+  connectedNotebooksCount: number;
 }
 
 export function XmtpStatusIndicator({
@@ -19,6 +20,7 @@ export function XmtpStatusIndicator({
   onConnect,
   onDisconnect,
   onToggleNetwork,
+  connectedNotebooksCount,
 }: XmtpStatusIndicatorProps) {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -26,14 +28,42 @@ export function XmtpStatusIndicator({
   const renderStatus = () => {
     switch (status) {
       case 'connected':
-        return <span className="text-xs text-green-600 dark:text-green-400 flex items-center"><Wifi size={12} className="mr-1" /> XMTP</span>;
+        return (
+          <div className="flex items-center">
+            <div className="h-2 w-2 rounded-full bg-green-500 mr-2" />
+            <span className="text-xs text-green-600 dark:text-green-400 flex items-center">
+              <Wifi size={12} className="mr-1" /> XMTP
+            </span>
+          </div>
+        );
       case 'connecting':
-        return <span className="text-xs text-yellow-600 dark:text-yellow-400 flex items-center"><Loader2 size={12} className="mr-1 animate-spin" /> XMTP</span>;
+        return (
+          <div className="flex items-center">
+            <div className="h-2 w-2 rounded-full bg-yellow-500 animate-pulse mr-2" />
+            <span className="text-xs text-yellow-600 dark:text-yellow-400 flex items-center">
+              <Loader2 size={12} className="mr-1 animate-spin" /> XMTP
+            </span>
+          </div>
+        );
       case 'error':
-        return <span className="text-xs text-red-600 dark:text-red-400 flex items-center"><AlertCircle size={12} className="mr-1" /> XMTP</span>;
+        return (
+          <div className="flex items-center">
+            <div className="h-2 w-2 rounded-full bg-red-500 mr-2" />
+            <span className="text-xs text-red-600 dark:text-red-400 flex items-center">
+              <AlertCircle size={12} className="mr-1" /> XMTP
+            </span>
+          </div>
+        );
       case 'disconnected':
       default:
-        return <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center"><WifiOff size={12} className="mr-1" /> XMTP</span>;
+        return (
+          <div className="flex items-center">
+            <div className="h-2 w-2 rounded-full bg-gray-400 mr-2" />
+            <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center">
+              <WifiOff size={12} className="mr-1" /> XMTP
+            </span>
+          </div>
+        );
     }
   };
 
@@ -68,6 +98,7 @@ export function XmtpStatusIndicator({
         }}
         onToggleNetwork={onToggleNetwork}
         address={address || undefined}
+        connectedNotebooksCount={connectedNotebooksCount}
       />
     </>
   );

@@ -7,6 +7,7 @@ export interface Notebook {
   name: string;
   createdAt: number;
   updatedAt: number;
+  xmtpTopic?: string;
 }
 
 export interface Folder {
@@ -78,17 +79,17 @@ const initDB = (): Promise<IDBPDatabase<StormDanceDB>> => {
         console.log("V5 Migration: Removing 'aesKey' from notebooks...");
         const store = tx.objectStore('notebooks');
         (async () => { // IIFE for async operation within upgrade
-            let cursor = await store.openCursor();
-            while(cursor) {
-                const value = cursor.value as any; // Cast to any for migration
-                const aesKey = value.aesKey;
-                const { aesKey: _removed, ...rest } = value; // Use different name for removed key
-                if (aesKey !== undefined) {
-                    await cursor.update(rest);
-                }
-                cursor = await cursor.continue();
+          let cursor = await store.openCursor();
+          while (cursor) {
+            const value = cursor.value as any; // Cast to any for migration
+            const aesKey = value.aesKey;
+            const { aesKey: _removed, ...rest } = value; // Use different name for removed key
+            if (aesKey !== undefined) {
+              await cursor.update(rest);
             }
-            console.log("V5 Migration: 'aesKey' removal complete.");
+            cursor = await cursor.continue();
+          }
+          console.log("V5 Migration: 'aesKey' removal complete.");
         })();
       }
 
@@ -99,7 +100,7 @@ const initDB = (): Promise<IDBPDatabase<StormDanceDB>> => {
         foldersStore.createIndex('by-notebook', 'notebookId');
         foldersStore.createIndex('by-parent-folder', 'parentFolderId');
       } else if (oldVersion < 3 && tx.objectStore('folders').indexNames.contains('by-parent-folder') === false) {
-          tx.objectStore('folders').createIndex('by-parent-folder', 'parentFolderId');
+        tx.objectStore('folders').createIndex('by-parent-folder', 'parentFolderId');
       }
 
       // Notes Store
@@ -109,31 +110,31 @@ const initDB = (): Promise<IDBPDatabase<StormDanceDB>> => {
         notesStore.createIndex('by-notebook-updated', ['notebookId', 'updatedAt']);
         notesStore.createIndex('by-folder', 'folderId');
       } else {
-          const notesStore = tx.objectStore('notes');
-          // V2 migration
-          if (oldVersion < 2 && !notesStore.indexNames.contains('by-notebook-updated')) {
-              notesStore.createIndex('by-notebook-updated', ['notebookId', 'updatedAt']);
+        const notesStore = tx.objectStore('notes');
+        // V2 migration
+        if (oldVersion < 2 && !notesStore.indexNames.contains('by-notebook-updated')) {
+          notesStore.createIndex('by-notebook-updated', ['notebookId', 'updatedAt']);
+        }
+        // V3 migration
+        if (oldVersion < 3) {
+          if (!notesStore.indexNames.contains('by-folder')) {
+            notesStore.createIndex('by-folder', 'folderId');
           }
-          // V3 migration
-          if (oldVersion < 3) {
-              if (!notesStore.indexNames.contains('by-folder')) {
-                  notesStore.createIndex('by-folder', 'folderId');
+          // Migrate data
+          console.log("V3 Migration: Ensuring 'folderId' property...");
+          (async () => {
+            let cursor = await notesStore.openCursor();
+            while (cursor) {
+              const value = cursor.value;
+              // Check if folderId is missing
+              if (value.folderId === undefined) {
+                await cursor.update({ ...value, folderId: null });
               }
-              // Migrate data
-              console.log("V3 Migration: Ensuring 'folderId' property...");
-              (async () => {
-                  let cursor = await notesStore.openCursor();
-                  while (cursor) {
-                      const value = cursor.value;
-                      // Check if folderId is missing
-                      if (value.folderId === undefined) {
-                           await cursor.update({ ...value, folderId: null });
-                      }
-                      cursor = await cursor.continue();
-                  }
-                  console.log("V3 Migration: 'folderId' check complete.");
-              })();
-          }
+              cursor = await cursor.continue();
+            }
+            console.log("V3 Migration: 'folderId' check complete.");
+          })();
+        }
       }
     },
     blocked() {
@@ -211,6 +212,21 @@ export const dbService = {
     return newNotebook;
   },
 
+  async createReplicaNotebook(notebook: Notebook): Promise<Notebook> {
+    const db = await this.getDb();
+    await db.put('notebooks', notebook);
+    return notebook;
+  },
+
+  async updateNotebook(id: string, updates: Partial<Omit<Notebook, 'id' | 'createdAt' | 'updatedAt'>>): Promise<Notebook | undefined> {
+    const db = await this.getDb();
+    const notebook = await db.get('notebooks', id);
+    if (!notebook) return undefined;
+    const updatedNotebook: Notebook = { ...notebook, ...updates, updatedAt: Date.now() };
+    await db.put('notebooks', updatedNotebook);
+    return updatedNotebook;
+  },
+
   // --- Folder operations ---
   async getAllFolders(notebookId: string): Promise<Folder[]> {
     const db = await this.getDb();
@@ -256,13 +272,13 @@ export const dbService = {
 
     // Re-parent notes
     let notesCursor = await notesStore.index('by-folder').openCursor(IDBKeyRange.only(id));
-    while(notesCursor) {
+    while (notesCursor) {
       await notesCursor.update({ ...notesCursor.value, folderId: targetParentId, updatedAt: Date.now() });
       notesCursor = await notesCursor.continue();
     }
     // Re-parent subfolders
     let subfoldersCursor = await foldersStore.index('by-parent-folder').openCursor(IDBKeyRange.only(id));
-    while(subfoldersCursor) {
+    while (subfoldersCursor) {
       await subfoldersCursor.update({ ...subfoldersCursor.value, parentFolderId: targetParentId, updatedAt: Date.now() });
       subfoldersCursor = await subfoldersCursor.continue();
     }
@@ -352,14 +368,14 @@ export const dbService = {
 
     // 1. Delete all notes associated with the notebook
     let notesCursor = await notesStore.index('by-notebook-updated').openCursor(IDBKeyRange.bound([notebookId, -Infinity], [notebookId, Infinity]));
-    while(notesCursor) {
+    while (notesCursor) {
       await notesCursor.delete();
       notesCursor = await notesCursor.continue();
     }
 
     // 2. Delete all folders associated with the notebook
     let foldersCursor = await foldersStore.index('by-notebook').openCursor(IDBKeyRange.only(notebookId));
-    while(foldersCursor) {
+    while (foldersCursor) {
       await foldersCursor.delete();
       foldersCursor = await foldersCursor.continue();
     }

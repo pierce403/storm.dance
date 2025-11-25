@@ -13,3 +13,14 @@ export interface CrdtUpdatePayload {
   version: number;
   author?: string;
 }
+
+export interface InvitePayload {
+  notebookId: string;
+  notebookName: string;
+  inviterName?: string; // Optional display name
+  inviterAddress: string;
+}
+
+export type CollaborationMessage =
+  | { type: 'crdt-update'; payload: CrdtUpdatePayload }
+  | { type: 'invite'; payload: InvitePayload };
