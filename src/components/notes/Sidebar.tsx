@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, RefObject, KeyboardEvent, forwardRe
 import { Plus, Trash2, Book, Loader2, ChevronRight, ChevronDown, Folder as FolderIcon, Edit2, Info, Key, AlertCircle, Download } from 'lucide-react';
 import { Note, Notebook, Folder, dbService } from '../../lib/db';
 import { XmtpConnect } from '../xmtp/XmtpConnect';
-import type { BrowserClient } from '@xmtp/browser-sdk';
+import type { BrowserClient } from '@/lib/xmtp-browser-sdk';
 import { encryptBackup } from '../../lib/cryptoUtils';
 import { saveAs } from 'file-saver';
 import { NotebookCollaborationPanel } from './NotebookCollaborationPanel';
@@ -23,7 +23,7 @@ interface SidebarProps {
   initialXmtpNetworkEnv: 'dev' | 'production';
   triggerXmtpConnect: boolean;
   triggerXmtpDisconnect: boolean;
-  
+
   // Existing props
   notebooks: Notebook[];
   selectedNotebookId: string | null;
@@ -68,7 +68,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     initialXmtpNetworkEnv,
     triggerXmtpConnect,
     triggerXmtpDisconnect,
-    
+
     // Existing props
     notebooks,
     selectedNotebookId,
@@ -150,9 +150,9 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     }
     const originalFolder = folders.find(f => f.id === renamingFolderId);
     if (originalFolder && originalFolder.name === folderNewName.trim()) {
-        setRenamingFolderId(null); // Cancel if name didn't change
-        itemRefs.current.get(`folder-${renamingFolderId}`)?.focus();
-        return;
+      setRenamingFolderId(null); // Cancel if name didn't change
+      itemRefs.current.get(`folder-${renamingFolderId}`)?.focus();
+      return;
     }
 
     try {
@@ -181,39 +181,39 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
   };
 
   // --- Helper functions for folder/note retrieval ---
-  const getRootFolders = () => folders.filter(f => f.parentFolderId === null && f.notebookId === selectedNotebookId).sort((a,b) => a.name.localeCompare(b.name));
-  const getChildFolders = (parentId: string) => folders.filter(f => f.parentFolderId === parentId).sort((a,b) => a.name.localeCompare(b.name));
-  const getNotesInFolder = (folderId: string | null) => notes.filter(n => n.folderId === folderId && n.notebookId === selectedNotebookId).sort((a,b) => (a.title || '').localeCompare(b.title || ''));
+  const getRootFolders = () => folders.filter(f => f.parentFolderId === null && f.notebookId === selectedNotebookId).sort((a, b) => a.name.localeCompare(b.name));
+  const getChildFolders = (parentId: string) => folders.filter(f => f.parentFolderId === parentId).sort((a, b) => a.name.localeCompare(b.name));
+  const getNotesInFolder = (folderId: string | null) => notes.filter(n => n.folderId === folderId && n.notebookId === selectedNotebookId).sort((a, b) => (a.title || '').localeCompare(b.title || ''));
 
   // --- Helper function to get flattened list of visible items (defined outside useImperativeHandle) ---
-   const getOrderedElements = (): HTMLElement[] => {
-       const orderedElements: HTMLElement[] = [];
-       const rootFolders = getRootFolders();
-       const rootNotes = getNotesInFolder(null);
+  const getOrderedElements = (): HTMLElement[] => {
+    const orderedElements: HTMLElement[] = [];
+    const rootFolders = getRootFolders();
+    const rootNotes = getNotesInFolder(null);
 
-       const traverse = (folderId: string) => {
-           const folderElement = itemRefs.current.get(`folder-${folderId}`);
-           if (folderElement) orderedElements.push(folderElement);
+    const traverse = (folderId: string) => {
+      const folderElement = itemRefs.current.get(`folder-${folderId}`);
+      if (folderElement) orderedElements.push(folderElement);
 
-           if (expandedFolders.has(folderId)) {
-               const children = getChildFolders(folderId);
-               children.forEach(child => traverse(child.id));
-               const notesInside = getNotesInFolder(folderId);
-               notesInside.forEach(note => {
-                   const noteElement = itemRefs.current.get(`note-${note.id}`);
-                   if (noteElement) orderedElements.push(noteElement);
-               });
-           }
-       };
+      if (expandedFolders.has(folderId)) {
+        const children = getChildFolders(folderId);
+        children.forEach(child => traverse(child.id));
+        const notesInside = getNotesInFolder(folderId);
+        notesInside.forEach(note => {
+          const noteElement = itemRefs.current.get(`note-${note.id}`);
+          if (noteElement) orderedElements.push(noteElement);
+        });
+      }
+    };
 
-       rootFolders.forEach(folder => traverse(folder.id));
-       rootNotes.forEach(note => {
-           const noteElement = itemRefs.current.get(`note-${note.id}`);
-           if (noteElement) orderedElements.push(noteElement);
-       });
+    rootFolders.forEach(folder => traverse(folder.id));
+    rootNotes.forEach(note => {
+      const noteElement = itemRefs.current.get(`note-${note.id}`);
+      if (noteElement) orderedElements.push(noteElement);
+    });
 
-       return orderedElements;
-   };
+    return orderedElements;
+  };
 
   // --- Keyboard Navigation Logic ---
   useEffect(() => {
@@ -310,19 +310,19 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
           if (!isExpanded) {
             toggleFolder(folderIdAttr);
           } else {
-             // Navigate to first child if possible
-             const firstChildElement = orderedElements[currentIndex + 1];
-             const firstChildFolderId = firstChildElement?.getAttribute('data-folder-id');
-             const firstChildNoteId = firstChildElement?.getAttribute('data-note-id');
-             const folder = folders.find(f => f.id === folderIdAttr);
+            // Navigate to first child if possible
+            const firstChildElement = orderedElements[currentIndex + 1];
+            const firstChildFolderId = firstChildElement?.getAttribute('data-folder-id');
+            const firstChildNoteId = firstChildElement?.getAttribute('data-note-id');
+            const folder = folders.find(f => f.id === folderIdAttr);
 
-             if (folder && firstChildElement) {
-                const isChild = (firstChildFolderId && folders.find(f => f.id === firstChildFolderId)?.parentFolderId === folderIdAttr) ||
-                              (firstChildNoteId && notes.find(n => n.id === firstChildNoteId)?.folderId === folderIdAttr);
-                 if (isChild) {
-                     firstChildElement.focus();
-                 }
-             }
+            if (folder && firstChildElement) {
+              const isChild = (firstChildFolderId && folders.find(f => f.id === firstChildFolderId)?.parentFolderId === folderIdAttr) ||
+                (firstChildNoteId && notes.find(n => n.id === firstChildNoteId)?.folderId === folderIdAttr);
+              if (isChild) {
+                firstChildElement.focus();
+              }
+            }
           }
         }
         return;
@@ -395,22 +395,22 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
   const handleDragLeave = (e: React.DragEvent) => {
     // Check if leaving to a valid child or outside relevant area
     // This logic can be tricky; simpler might be to just clear on drop/end
-     const relatedTarget = e.relatedTarget as Node | null;
-     // A simple check: If the related target is outside the sidebar container, clear the highlight.
-     // More robust checks might involve checking if relatedTarget is still within a valid drop zone.
-     if (!containerRef?.current?.contains(relatedTarget)) {
-        setDragOverTargetId(null);
-     }
-     // A simpler alternative: rely mostly on handleDragOver and handleDrop/End to clear state.
-     // setDragOverTargetId(null); // This might flicker
+    const relatedTarget = e.relatedTarget as Node | null;
+    // A simple check: If the related target is outside the sidebar container, clear the highlight.
+    // More robust checks might involve checking if relatedTarget is still within a valid drop zone.
+    if (!containerRef?.current?.contains(relatedTarget)) {
+      setDragOverTargetId(null);
+    }
+    // A simpler alternative: rely mostly on handleDragOver and handleDrop/End to clear state.
+    // setDragOverTargetId(null); // This might flicker
   };
 
-    const handleDragEnd = (_e: React.DragEvent) => {
-        // Always clear drag state when drag operation ends (successfully or not)
-        setDraggedItemId(null);
-        setDraggedItemType(null);
-        setDragOverTargetId(null);
-    };
+  const handleDragEnd = (_e: React.DragEvent) => {
+    // Always clear drag state when drag operation ends (successfully or not)
+    setDraggedItemId(null);
+    setDraggedItemType(null);
+    setDragOverTargetId(null);
+  };
 
   const handleDrop = async (e: React.DragEvent, targetFolderId: string | null) => {
     e.preventDefault();
@@ -418,10 +418,10 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
 
     const droppedData = e.dataTransfer.getData('application/json');
     if (!droppedData) {
-         setDragOverTargetId(null);
-         setDraggedItemId(null);
-         setDraggedItemType(null);
-         return;
+      setDragOverTargetId(null);
+      setDraggedItemId(null);
+      setDraggedItemType(null);
+      return;
     }
 
     let parsedData: { type: 'note' | 'folder', id: string };
@@ -429,9 +429,9 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
       parsedData = JSON.parse(droppedData);
     } catch (err) {
       console.error("Error parsing drag data:", err);
-       setDragOverTargetId(null);
-       setDraggedItemId(null);
-       setDraggedItemType(null);
+      setDragOverTargetId(null);
+      setDraggedItemId(null);
+      setDraggedItemType(null);
       return;
     }
 
@@ -439,10 +439,10 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
 
     // Prevent dropping onto self (though DB service also checks)
     if (droppedItemType === 'folder' && droppedItemId === targetFolderId) {
-         setDragOverTargetId(null);
-         setDraggedItemId(null);
-         setDraggedItemType(null);
-        return;
+      setDragOverTargetId(null);
+      setDraggedItemId(null);
+      setDraggedItemType(null);
+      return;
     }
 
     // Call the appropriate move handler
@@ -459,10 +459,10 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
         }
       }
 
-       // Expand target folder after a successful drop
-        if (targetFolderId && !expandedFolders.has(targetFolderId)) {
-            toggleFolder(targetFolderId);
-        }
+      // Expand target folder after a successful drop
+      if (targetFolderId && !expandedFolders.has(targetFolderId)) {
+        toggleFolder(targetFolderId);
+      }
 
     } catch (error) {
       console.error(`Failed to move ${droppedItemType}:`, error);
@@ -481,115 +481,115 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     let renderedElements: JSX.Element[] = [];
 
     folderList.forEach(folder => {
-        const isExpanded = expandedFolders.has(folder.id);
-        const isDragOver = dragOverTargetId === folder.id;
-        const isBeingDragged = draggedItemType === 'folder' && draggedItemId === folder.id;
-        const isRenaming = renamingFolderId === folder.id;
+      const isExpanded = expandedFolders.has(folder.id);
+      const isDragOver = dragOverTargetId === folder.id;
+      const isBeingDragged = draggedItemType === 'folder' && draggedItemId === folder.id;
+      const isRenaming = renamingFolderId === folder.id;
 
-        renderedElements.push(
-            <li key={`folder-${folder.id}`} className={`ml-${depth * 2} mb-px ${isBeingDragged ? 'opacity-40' : ''} list-none`}>
-                <div
-                    className={`flex items-center group rounded-sm ${isDragOver ? 'bg-yellow-200 dark:bg-yellow-800/40' : ''} focus-within:bg-yellow-100 dark:focus-within:bg-yellow-900/30`}
-                    onDragOver={(e) => handleDragOver(e, folder.id)}
-                    onDragLeave={handleDragLeave}
-                    onDrop={(e) => handleDrop(e, folder.id)}
-                    draggable={!isRenaming} // Prevent dragging while renaming
-                    onDragStart={!isRenaming ? (e) => handleDragStart(e, 'folder', folder.id) : undefined}
-                    onDragEnd={handleDragEnd} // Add drag end handler
-                    ref={registerRef('folder', folder.id)}
-                    tabIndex={-1}
-                    data-folder-id={folder.id}
-                    aria-expanded={isExpanded}
+      renderedElements.push(
+        <li key={`folder-${folder.id}`} className={`ml-${depth * 2} mb-px ${isBeingDragged ? 'opacity-40' : ''} list-none`}>
+          <div
+            className={`flex items-center group rounded-sm ${isDragOver ? 'bg-yellow-200 dark:bg-yellow-800/40' : ''} focus-within:bg-yellow-100 dark:focus-within:bg-yellow-900/30`}
+            onDragOver={(e) => handleDragOver(e, folder.id)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, folder.id)}
+            draggable={!isRenaming} // Prevent dragging while renaming
+            onDragStart={!isRenaming ? (e) => handleDragStart(e, 'folder', folder.id) : undefined}
+            onDragEnd={handleDragEnd} // Add drag end handler
+            ref={registerRef('folder', folder.id)}
+            tabIndex={-1}
+            data-folder-id={folder.id}
+            aria-expanded={isExpanded}
+          >
+            <button
+              onClick={() => toggleFolder(folder.id)}
+              className="p-1 mr-1 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-sm focus:outline-none focus:ring-1 focus:ring-yellow-400"
+              aria-label={isExpanded ? `Collapse ${folder.name}` : `Expand ${folder.name}`}
+              tabIndex={-1}
+            >
+              {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </button>
+            {isRenaming ? (
+              <form onSubmit={handleRenameFolderSubmit} className="flex-1 folder-edit-form">
+                <input
+                  type="text"
+                  value={folderNewName}
+                  onChange={(e) => setFolderNewName(e.target.value)}
+                  className="flex-1 folder-edit-input p-0.5 text-sm bg-white dark:bg-gray-800 border border-yellow-400 rounded-sm focus:outline-none dark:text-gray-100"
+                  autoFocus
+                  onBlur={handleRenameFolderSubmit} // Save on blur too
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') { e.stopPropagation(); setRenamingFolderId(null); itemRefs.current.get(`folder-${folder.id}`)?.focus(); }
+                    if (e.key === 'Enter') { e.stopPropagation(); handleRenameFolderSubmit(e); }
+                  }}
+                />
+              </form>
+            ) : (
+              <>
+                <div className="flex items-center flex-1 p-1 rounded-sm group-hover:bg-gray-100 dark:group-hover:bg-gray-800 text-gray-800 dark:text-gray-200">
+                  <FolderIcon size={16} className="mr-1 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                  <span className="text-sm truncate select-none flex-1">{folder.name}</span>
+                </div>
+                <button
+                  className="p-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-100 dark:hover:bg-gray-700 rounded-sm focus:outline-none focus:ring-1 focus:ring-yellow-400 mr-1"
+                  onClick={(e) => { e.stopPropagation(); handleRenameFolderClick(folder); }}
+                  title="Rename folder"
+                  aria-label={`Rename folder ${folder.name}`}
+                  tabIndex={-1}
                 >
-                    <button
-                        onClick={() => toggleFolder(folder.id)}
-                        className="p-1 mr-1 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-sm focus:outline-none focus:ring-1 focus:ring-yellow-400"
-                        aria-label={isExpanded ? `Collapse ${folder.name}` : `Expand ${folder.name}`}
-                        tabIndex={-1}
-                    >
-                        {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                    </button>
-                    {isRenaming ? (
-                         <form onSubmit={handleRenameFolderSubmit} className="flex-1 folder-edit-form">
-                             <input
-                                type="text"
-                                value={folderNewName}
-                                onChange={(e) => setFolderNewName(e.target.value)}
-                                className="flex-1 folder-edit-input p-0.5 text-sm bg-white dark:bg-gray-800 border border-yellow-400 rounded-sm focus:outline-none dark:text-gray-100"
-                                autoFocus
-                                onBlur={handleRenameFolderSubmit} // Save on blur too
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Escape') { e.stopPropagation(); setRenamingFolderId(null); itemRefs.current.get(`folder-${folder.id}`)?.focus();}
-                                    if (e.key === 'Enter') { e.stopPropagation(); handleRenameFolderSubmit(e); }
-                                }}
-                            />
-                         </form>
-                     ) : (
-                         <>
-                             <div className="flex items-center flex-1 p-1 rounded-sm group-hover:bg-gray-100 dark:group-hover:bg-gray-800 text-gray-800 dark:text-gray-200">
-                                 <FolderIcon size={16} className="mr-1 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                                 <span className="text-sm truncate select-none flex-1">{folder.name}</span>
-                             </div>
-                              <button
-                                  className="p-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-100 dark:hover:bg-gray-700 rounded-sm focus:outline-none focus:ring-1 focus:ring-yellow-400 mr-1"
-                                  onClick={(e) => {e.stopPropagation(); handleRenameFolderClick(folder);}}
-                                  title="Rename folder"
-                                  aria-label={`Rename folder ${folder.name}`}
-                                  tabIndex={-1}
-                              >
-                                  <Edit2 size={14} />
-                              </button>
-                              <button
-                                  className="p-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 text-red-500 hover:bg-red-100 dark:hover:bg-gray-700 rounded-sm focus:outline-none focus:ring-1 focus:ring-red-400"
-                                  onClick={(e) => {e.stopPropagation(); onDeleteFolder(folder.id);}}
-                                  title="Delete folder"
-                                  aria-label={`Delete folder ${folder.name}`}
-                                  tabIndex={-1}
-                              >
-                                  <Trash2 size={14} />
-                              </button>
-                         </>
-                     )}
-             </div>
-                {isExpanded && (
-                    <ul className="pl-4" role="group"> {/* Add role group for nested list */} 
-                        {renderFolderTree(folder.id, depth + 1)}
-                    </ul>
-                )}
-            </li>
-        );
+                  <Edit2 size={14} />
+                </button>
+                <button
+                  className="p-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 text-red-500 hover:bg-red-100 dark:hover:bg-gray-700 rounded-sm focus:outline-none focus:ring-1 focus:ring-red-400"
+                  onClick={(e) => { e.stopPropagation(); onDeleteFolder(folder.id); }}
+                  title="Delete folder"
+                  aria-label={`Delete folder ${folder.name}`}
+                  tabIndex={-1}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </>
+            )}
+          </div>
+          {isExpanded && (
+            <ul className="pl-4" role="group"> {/* Add role group for nested list */}
+              {renderFolderTree(folder.id, depth + 1)}
+            </ul>
+          )}
+        </li>
+      );
     });
 
     noteList.forEach(note => {
-        const isBeingDragged = draggedItemType === 'note' && draggedItemId === note.id;
-        renderedElements.push(
-             <li
-                key={`note-${note.id}`}
-                className={`relative group ml-${depth * 2} list-none ${isBeingDragged ? 'opacity-40' : ''}`}
-                draggable
-                onDragStart={(e) => handleDragStart(e, 'note', note.id)}
-                onDragEnd={handleDragEnd} // Add drag end handler
-             >
-                <button
-                    className={`w-full text-left px-3 py-1 my-px rounded-sm text-sm draggable-note focus:outline-none focus:ring-1 focus:ring-yellow-400 focus:bg-yellow-100 dark:focus:bg-yellow-900/30 ${selectedNoteId === note.id ? 'bg-yellow-100 dark:bg-yellow-900/30 font-medium text-yellow-900 dark:text-yellow-100' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
-                    onClick={() => onSelectNote(note)}
-                    data-note-id={note.id}
-                    ref={registerRef('note', note.id)}
-                    tabIndex={-1}
-                >
-                     <span className="block truncate select-none">{note.title || 'Untitled'}</span>
-                </button>
-                 <button
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-sm opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-red-100 dark:hover:bg-gray-700 text-red-600 focus:outline-none focus:ring-1 focus:ring-red-400"
-                    onClick={(e) => { e.stopPropagation(); onDeleteNote(note.id); }}
-                    title="Delete note"
-                    aria-label={`Delete note ${note.title || 'Untitled'}`}
-                    tabIndex={-1}
-                >
-                    <Trash2 className="h-3 w-3" />
-                </button>
-            </li>
-        );
+      const isBeingDragged = draggedItemType === 'note' && draggedItemId === note.id;
+      renderedElements.push(
+        <li
+          key={`note-${note.id}`}
+          className={`relative group ml-${depth * 2} list-none ${isBeingDragged ? 'opacity-40' : ''}`}
+          draggable
+          onDragStart={(e) => handleDragStart(e, 'note', note.id)}
+          onDragEnd={handleDragEnd} // Add drag end handler
+        >
+          <button
+            className={`w-full text-left px-3 py-1 my-px rounded-sm text-sm draggable-note focus:outline-none focus:ring-1 focus:ring-yellow-400 focus:bg-yellow-100 dark:focus:bg-yellow-900/30 ${selectedNoteId === note.id ? 'bg-yellow-100 dark:bg-yellow-900/30 font-medium text-yellow-900 dark:text-yellow-100' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+            onClick={() => onSelectNote(note)}
+            data-note-id={note.id}
+            ref={registerRef('note', note.id)}
+            tabIndex={-1}
+          >
+            <span className="block truncate select-none">{note.title || 'Untitled'}</span>
+          </button>
+          <button
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-sm opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-red-100 dark:hover:bg-gray-700 text-red-600 focus:outline-none focus:ring-1 focus:ring-red-400"
+            onClick={(e) => { e.stopPropagation(); onDeleteNote(note.id); }}
+            title="Delete note"
+            aria-label={`Delete note ${note.title || 'Untitled'}`}
+            tabIndex={-1}
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </li>
+      );
     });
 
     return renderedElements;
@@ -605,9 +605,9 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
         // If no specific item, try focusing the first visible item
         const firstElement = getOrderedElements()[0]; // Now accessible
         if (firstElement) {
-             const folderId = firstElement.getAttribute('data-folder-id');
-             const noteId = firstElement.getAttribute('data-note-id');
-             targetKey = folderId ? `folder-${folderId}` : (noteId ? `note-${noteId}` : null);
+          const folderId = firstElement.getAttribute('data-folder-id');
+          const noteId = firstElement.getAttribute('data-note-id');
+          targetKey = folderId ? `folder-${folderId}` : (noteId ? `note-${noteId}` : null);
         }
       }
 
@@ -615,8 +615,8 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
         const elementToFocus = itemRefs.current.get(targetKey);
         elementToFocus?.focus();
       } else {
-         // Fallback: focus the container itself if no specific item found
-         containerRef?.current?.focus();
+        // Fallback: focus the container itself if no specific item found
+        containerRef?.current?.focus();
       }
     }
   }));
@@ -631,165 +631,165 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
       tabIndex={-1}
       className="h-full flex flex-col border-r focus:outline-none"
     >
-       {/* XMTP Connect Section */} 
-        <div className="p-4 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
-            <XmtpConnect
-              onConnect={onXmtpConnected}
-              onDisconnect={onXmtpDisconnected}
-              onError={onXmtpError}
-              initialNetworkEnv={initialXmtpNetworkEnv}
-              triggerConnect={triggerXmtpConnect}
-              triggerDisconnect={triggerXmtpDisconnect}
-              isConnected={xmtpConnected}
-            />
+      {/* XMTP Connect Section */}
+      <div className="p-4 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
+        <XmtpConnect
+          onConnect={onXmtpConnected}
+          onDisconnect={onXmtpDisconnected}
+          onError={onXmtpError}
+          initialNetworkEnv={initialXmtpNetworkEnv}
+          triggerConnect={triggerXmtpConnect}
+          triggerDisconnect={triggerXmtpDisconnect}
+          isConnected={xmtpConnected}
+        />
+      </div>
+      <div className="p-4 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
+        <NotebookCollaborationPanel
+          notebookName={selectedNotebook?.name}
+          contacts={collaborationContacts}
+          sessionTopic={collaborationTopic}
+          status={collaborationStatus}
+          error={collaborationError}
+          isXmtpConnected={isXmtpConnected}
+          onAddContact={onAddCollaborator}
+          onRemoveContact={onRemoveCollaborator}
+          onStartCollaboration={() => onStartCollaborating(selectedNotebookId)}
+          onStopCollaboration={onStopCollaborating}
+          xmtpEnv={xmtpEnv}
+        />
+      </div>
+      <div className="p-4 flex-col space-y-2 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
+        <div className="flex justify-between items-center">
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Notebooks</h2>
+          <button
+            className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-yellow-400"
+            onClick={() => { /* TODO: Implement create notebook UI */ }}
+            aria-label="Create new notebook"
+            tabIndex={-1}
+          >
+            <Plus className="h-5 w-5" />
+          </button>
         </div>
-        <div className="p-4 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
-          <NotebookCollaborationPanel
-            notebookName={selectedNotebook?.name}
-            contacts={collaborationContacts}
-            sessionTopic={collaborationTopic}
-            status={collaborationStatus}
-            error={collaborationError}
-            isXmtpConnected={isXmtpConnected}
-            onAddContact={onAddCollaborator}
-            onRemoveContact={onRemoveCollaborator}
-            onStartCollaboration={() => onStartCollaborating(selectedNotebookId)}
-            onStopCollaboration={onStopCollaborating}
-            xmtpEnv={xmtpEnv}
-          />
-        </div>
-        <div className="p-4 flex-col space-y-2 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
-            <div className="flex justify-between items-center">
-                <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Notebooks</h2>
-            <button
-                    className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-yellow-400"
-                    onClick={() => { /* TODO: Implement create notebook UI */ }}
-                    aria-label="Create new notebook"
-                    tabIndex={-1}
-                >
-                    <Plus className="h-5 w-5" />
-            </button>
-         </div>
-            {/* Notebook List */} 
-             <ul className="space-y-1 mt-2">
-              {notebooks.map((notebook) => (
-                <li key={notebook.id} className="relative">
-                  <button
-                    className={`w-full flex items-center px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-yellow-400 ${selectedNotebookId === notebook.id ? "bg-gray-200 dark:bg-yellow-900/30 font-medium dark:text-yellow-100" : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
-                    onClick={() => onSelectNotebook(notebook.id)}
-                    tabIndex={-1}
-                    data-notebook-id={notebook.id}
-                  >
-                    <Book className="h-4 w-4 mr-2 flex-shrink-0 text-gray-500 dark:text-gray-400" />
-                    <span className="truncate flex-1 text-left">{notebook.name}</span>
-                  </button>
-                  {/* Info Button */} 
-                  <button
-                      className="p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded absolute right-2 top-1/2 -translate-y-1/2"
-                      onClick={(e) => { e.stopPropagation(); setInfoModalNotebook(notebook); }}
-                      aria-label={`Show info for notebook ${notebook.name}`}
-                      title="Show notebook info"
-                      tabIndex={-1} // Keep non-tabbable if main button is focus target
-                  >
-                      <Info size={14} />
-                  </button>
-                </li>
-              ))}
-            </ul>
+        {/* Notebook List */}
+        <ul className="space-y-1 mt-2">
+          {notebooks.map((notebook) => (
+            <li key={notebook.id} className="relative">
+              <button
+                className={`w-full flex items-center px-3 py-2 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-yellow-400 ${selectedNotebookId === notebook.id ? "bg-gray-200 dark:bg-yellow-900/30 font-medium dark:text-yellow-100" : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
+                onClick={() => onSelectNotebook(notebook.id)}
+                tabIndex={-1}
+                data-notebook-id={notebook.id}
+              >
+                <Book className="h-4 w-4 mr-2 flex-shrink-0 text-gray-500 dark:text-gray-400" />
+                <span className="truncate flex-1 text-left">{notebook.name}</span>
+              </button>
+              {/* Info Button */}
+              <button
+                className="p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded absolute right-2 top-1/2 -translate-y-1/2"
+                onClick={(e) => { e.stopPropagation(); setInfoModalNotebook(notebook); }}
+                aria-label={`Show info for notebook ${notebook.name}`}
+                title="Show notebook info"
+                tabIndex={-1} // Keep non-tabbable if main button is focus target
+              >
+                <Info size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
 
-      {/* Folders and Notes Section */} 
+      {/* Folders and Notes Section */}
       <div className="flex-1 overflow-hidden flex flex-col">
-          <div className="p-4 flex justify-between items-center border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
-            <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Notes</h2>
-             {/* ... Create Folder/Note buttons ... */}
-              <div className="flex">
-                 <button
-                    className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 disabled:opacity-50 mr-1 focus:outline-none focus:ring-1 focus:ring-yellow-400"
-                    onClick={() => { setIsCreatingFolder(true); setNewFolderParentId(null); }}
-                    title="Create new folder"
-                    disabled={!selectedNotebookId || isLoading}
-                    aria-label="Create new root folder"
-                    tabIndex={-1}
-                 >
-                    <FolderIcon className="h-5 w-5" />
-                 </button>
+        <div className="p-4 flex justify-between items-center border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Notes</h2>
+          {/* ... Create Folder/Note buttons ... */}
+          <div className="flex">
             <button
-                    className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-yellow-400"
-                    onClick={() => onCreateNote()} // Use onCreateNote directly
-                    title="Create new note (n)"
+              className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 disabled:opacity-50 mr-1 focus:outline-none focus:ring-1 focus:ring-yellow-400"
+              onClick={() => { setIsCreatingFolder(true); setNewFolderParentId(null); }}
+              title="Create new folder"
               disabled={!selectedNotebookId || isLoading}
-                    aria-label="Create new note"
-                    tabIndex={-1}
+              aria-label="Create new root folder"
+              tabIndex={-1}
+            >
+              <FolderIcon className="h-5 w-5" />
+            </button>
+            <button
+              className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-yellow-400"
+              onClick={() => onCreateNote()} // Use onCreateNote directly
+              title="Create new note (n)"
+              disabled={!selectedNotebookId || isLoading}
+              aria-label="Create new note"
+              tabIndex={-1}
             >
               <Plus className="h-5 w-5" />
             </button>
           </div>
-                </div>
+        </div>
 
-           {/* ... Folder Creation Form ... */} 
-           {isCreatingFolder && (
-                <div className="px-4 py-2 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
-                  <form onSubmit={handleCreateFolderSubmit} className="mt-2">
-                    <input
-                      type="text"
-                      value={newFolderName}
-                      onChange={(e) => setNewFolderName(e.target.value)}
-                      placeholder="Folder name"
-                      className="w-full p-2 border rounded-md text-sm bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-yellow-400 focus:border-yellow-400 dark:text-gray-100"
-                      autoFocus
-                      onKeyDown={(e) => { if (e.key === 'Escape') setIsCreatingFolder(false); }}
-                    />
-                     <div className="flex justify-end mt-2 space-x-2">
-                      <button
-                         type="button"
-                         onClick={() => setIsCreatingFolder(false)}
-                         className="px-2 py-1 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md"
-                       >
-                         Cancel
-                      </button>
-                      <button
-                         type="submit"
-                         className="px-2 py-1 text-sm bg-yellow-500 text-black rounded-md hover:bg-yellow-600 dark:bg-yellow-400 dark:hover:bg-yellow-500"
-                       >
-                         Create
-                      </button>
-                     </div>
-                  </form>
-                </div>
-           )}
-
-          {/* Tree View Area */} 
-          <div
-            className="flex-1 overflow-auto p-2 bg-white dark:bg-gray-850 !important scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 dark:scrollbar-thumb-gray-600 dark:hover:scrollbar-thumb-gray-500"
-             onDragOver={(e) => handleDragOver(e, null)} // Allow dropping on root area
-             onDragLeave={handleDragLeave}
-             onDrop={(e) => handleDrop(e, null)}
-          >
-            {isLoading ? (
-               <div className="flex items-center justify-center h-20 text-gray-500 dark:text-gray-400"><Loader2 className="mr-2 h-4 w-4 animate-spin text-gray-500 dark:text-gray-400" /> Loading...</div>
-            ) : !selectedNotebookId ? (
-               <p className="text-center text-gray-500 dark:text-gray-400 p-4 italic">Select a notebook</p>
-            ) : (folders.length === 0 && notes.filter(n => n.folderId === null && n.notebookId === selectedNotebookId).length === 0) ? (
-               <p className="text-center text-gray-500 dark:text-gray-400 p-4 italic">No notes or folders yet</p>
-            ) : (
-                <ul
-                  className="space-y-px list-none p-0 m-0"
-                  aria-label="Notes and Folders"
-                  role="tree"
-                  // Removed drag handlers from ul, handled by the wrapping div now
+        {/* ... Folder Creation Form ... */}
+        {isCreatingFolder && (
+          <div className="px-4 py-2 border-b border-gray-200 dark:border-yellow-400/50 bg-transparent dark:bg-gray-900">
+            <form onSubmit={handleCreateFolderSubmit} className="mt-2">
+              <input
+                type="text"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                placeholder="Folder name"
+                className="w-full p-2 border rounded-md text-sm bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-yellow-400 focus:border-yellow-400 dark:text-gray-100"
+                autoFocus
+                onKeyDown={(e) => { if (e.key === 'Escape') setIsCreatingFolder(false); }}
+              />
+              <div className="flex justify-end mt-2 space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCreatingFolder(false)}
+                  className="px-2 py-1 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md"
                 >
-                    {renderFolderTree(null)}
-                </ul>
-              )}
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-2 py-1 text-sm bg-yellow-500 text-black rounded-md hover:bg-yellow-600 dark:bg-yellow-400 dark:hover:bg-yellow-500"
+                >
+                  Create
+                </button>
+              </div>
+            </form>
           </div>
+        )}
+
+        {/* Tree View Area */}
+        <div
+          className="flex-1 overflow-auto p-2 bg-white dark:bg-gray-850 !important scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 dark:scrollbar-thumb-gray-600 dark:hover:scrollbar-thumb-gray-500"
+          onDragOver={(e) => handleDragOver(e, null)} // Allow dropping on root area
+          onDragLeave={handleDragLeave}
+          onDrop={(e) => handleDrop(e, null)}
+        >
+          {isLoading ? (
+            <div className="flex items-center justify-center h-20 text-gray-500 dark:text-gray-400"><Loader2 className="mr-2 h-4 w-4 animate-spin text-gray-500 dark:text-gray-400" /> Loading...</div>
+          ) : !selectedNotebookId ? (
+            <p className="text-center text-gray-500 dark:text-gray-400 p-4 italic">Select a notebook</p>
+          ) : (folders.length === 0 && notes.filter(n => n.folderId === null && n.notebookId === selectedNotebookId).length === 0) ? (
+            <p className="text-center text-gray-500 dark:text-gray-400 p-4 italic">No notes or folders yet</p>
+          ) : (
+            <ul
+              className="space-y-px list-none p-0 m-0"
+              aria-label="Notes and Folders"
+              role="tree"
+            // Removed drag handlers from ul, handled by the wrapping div now
+            >
+              {renderFolderTree(null)}
+            </ul>
+          )}
+        </div>
       </div>
 
-      {/* Render Modal */} 
-      <NotebookInfoModal 
-          notebook={infoModalNotebook} 
-          onClose={() => setInfoModalNotebook(null)} 
-          onDelete={onDeleteNotebook}
+      {/* Render Modal */}
+      <NotebookInfoModal
+        notebook={infoModalNotebook}
+        onClose={() => setInfoModalNotebook(null)}
+        onDelete={onDeleteNotebook}
       />
 
     </div>
@@ -827,7 +827,7 @@ const ExportPasswordModal: React.FC<{ notebookName: string; onExport: (password:
             autoFocus
           />
         </div>
-        {error && <p className="mb-2 text-xs text-red-600 dark:text-red-400 flex items-center"><AlertCircle size={14} className="mr-1"/>{error}</p>}
+        {error && <p className="mb-2 text-xs text-red-600 dark:text-red-400 flex items-center"><AlertCircle size={14} className="mr-1" />{error}</p>}
         <div className="flex justify-end space-x-2">
           <button onClick={onCancel} className="px-4 py-2 bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-100 rounded hover:bg-gray-300 dark:hover:bg-gray-500">
             Cancel
@@ -843,9 +843,9 @@ const ExportPasswordModal: React.FC<{ notebookName: string; onExport: (password:
 
 // --- Notebook Info Modal Component --- 
 const NotebookInfoModal: React.FC<{
-   notebook: Notebook | null; 
-   onClose: () => void;
-   onDelete: (notebookId: string | null) => void;
+  notebook: Notebook | null;
+  onClose: () => void;
+  onDelete: (notebookId: string | null) => void;
 }> = ({ notebook, onClose, onDelete }) => {
   const [isExporting, setIsExporting] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -859,72 +859,72 @@ const NotebookInfoModal: React.FC<{
 
   const handleExportWithPassword = async (password: string) => {
     if (!notebook) {
-        // Maybe use toast notification instead of modal error state
-        console.error("Cannot export: Missing notebook data."); 
-          return;
+      // Maybe use toast notification instead of modal error state
+      console.error("Cannot export: Missing notebook data.");
+      return;
     }
     setShowPasswordModal(false);
     setIsExporting(true);
     try {
-        console.log(`Exporting notebook: ${notebook.id}`);
-        const folders = await dbService.getAllFolders(notebook.id);
-        const notes = await dbService.getAllNotes(notebook.id);
+      console.log(`Exporting notebook: ${notebook.id}`);
+      const folders = await dbService.getAllFolders(notebook.id);
+      const notes = await dbService.getAllNotes(notebook.id);
 
-        // Create path structure
-        const folderMap = new Map<string, Folder>();
-        const folderPathMap = new Map<string, string>(); // Map ID to relative path
-        folders.forEach(f => folderMap.set(f.id, f));
+      // Create path structure
+      const folderMap = new Map<string, Folder>();
+      const folderPathMap = new Map<string, string>(); // Map ID to relative path
+      folders.forEach(f => folderMap.set(f.id, f));
 
-        const getPath = (folderId: string | null): string | null => {
-            if (!folderId) return null;
-            if (folderPathMap.has(folderId)) return folderPathMap.get(folderId)!;
+      const getPath = (folderId: string | null): string | null => {
+        if (!folderId) return null;
+        if (folderPathMap.has(folderId)) return folderPathMap.get(folderId)!;
 
-            const folder = folderMap.get(folderId);
-            if (!folder) return null; // Should not happen
+        const folder = folderMap.get(folderId);
+        if (!folder) return null; // Should not happen
 
-            const parentPath = getPath(folder.parentFolderId);
-            const currentPath = parentPath ? `${parentPath}/${folder.name}` : folder.name;
-            folderPathMap.set(folderId, currentPath);
-            return currentPath;
-        };
+        const parentPath = getPath(folder.parentFolderId);
+        const currentPath = parentPath ? `${parentPath}/${folder.name}` : folder.name;
+        folderPathMap.set(folderId, currentPath);
+        return currentPath;
+      };
 
-        // Ensure all paths are generated
-        folders.forEach(f => getPath(f.id));
+      // Ensure all paths are generated
+      folders.forEach(f => getPath(f.id));
 
-        const exportData = {
-            notebook: {
-                id: notebook.id, // Include original ID for reference
-                name: notebook.name,
-            },
-            folders: folders.map(f => ({
-                id: f.id,
-                name: f.name,
-                parentPath: getPath(f.parentFolderId),
-            })),
-            notes: notes.map(n => ({
-                id: n.id,
-                folderPath: getPath(n.folderId),
-                title: n.title,
-                content: n.content,
-                createdAt: n.createdAt,
-                updatedAt: n.updatedAt,
-            })),
-        };
+      const exportData = {
+        notebook: {
+          id: notebook.id, // Include original ID for reference
+          name: notebook.name,
+        },
+        folders: folders.map(f => ({
+          id: f.id,
+          name: f.name,
+          parentPath: getPath(f.parentFolderId),
+        })),
+        notes: notes.map(n => ({
+          id: n.id,
+          folderPath: getPath(n.folderId),
+          title: n.title,
+          content: n.content,
+          createdAt: n.createdAt,
+          updatedAt: n.updatedAt,
+        })),
+      };
 
-        // Encrypt using password
-        const wrapperJson = await encryptBackup(password, exportData);
+      // Encrypt using password
+      const wrapperJson = await encryptBackup(password, exportData);
 
-        // Create blob from the wrapper JSON string
-        const blob = new Blob([JSON.stringify(wrapperJson, null, 2)], { type: 'application/json' });
-        const filename = `${notebook.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}-backup.json.encrypted`; // New filename
-        saveAs(blob, filename);
+      // Create blob from the wrapper JSON string
+      const blob = new Blob([JSON.stringify(wrapperJson, null, 2)], { type: 'application/json' });
+      const filename = `${notebook.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}-backup.json.encrypted`; // New filename
+      saveAs(blob, filename);
 
     } catch (error) {
-        console.error("Export failed:", error);
-        // Use toast notification for errors
-        // Example: showToast('Export Failed', `...`, 'destructive');
+      console.error("Export failed:", error);
+      // Use toast notification for errors
+      // Example: showToast('Export Failed', `...`, 'destructive');
     } finally {
-        setIsExporting(false);
+      setIsExporting(false);
     }
   };
 
@@ -946,12 +946,12 @@ const NotebookInfoModal: React.FC<{
         <div className="mt-4 flex justify-between items-center">
           <div className="flex space-x-2">
             {/* Export Button */}
-            <button 
-              onClick={handleInitiateExport} 
+            <button
+              onClick={handleInitiateExport}
               disabled={isExporting}
               className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-yellow-400 dark:text-black dark:hover:bg-yellow-500 flex items-center"
             >
-              {isExporting ? 'Exporting...' : <><Download size={14} className="mr-1 inline-block"/>Export</>}
+              {isExporting ? 'Exporting...' : <><Download size={14} className="mr-1 inline-block" />Export</>}
             </button>
             {/* Delete Button */}
             <button
@@ -966,10 +966,10 @@ const NotebookInfoModal: React.FC<{
           </button>
         </div>
         {showPasswordModal && notebook && (
-          <ExportPasswordModal 
-              notebookName={notebook.name}
-              onExport={handleExportWithPassword}
-              onCancel={() => setShowPasswordModal(false)}
+          <ExportPasswordModal
+            notebookName={notebook.name}
+            onExport={handleExportWithPassword}
+            onCancel={() => setShowPasswordModal(false)}
           />
         )}
       </div>

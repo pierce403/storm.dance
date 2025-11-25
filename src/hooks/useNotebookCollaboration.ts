@@ -27,7 +27,11 @@ export function useNotebookCollaboration({ client, onRemoteUpdate, ensResolver }
       const resolved = await resolveEnsOrAddress(value, ensResolver);
       const alreadyAdded = contacts.find((c) => c.address.toLowerCase() === resolved.address.toLowerCase());
       if (alreadyAdded) return;
-      const canReach = await client.canMessage(resolved.address);
+
+      const identifier = { identifierKind: 'Ethereum' as const, identifier: resolved.address };
+      const canReachMap = await client.canMessage([identifier]);
+      const canReach = canReachMap.get(resolved.address) ?? false;
+
       if (!canReach) {
         throw new Error('Contact is not reachable on XMTP dev network');
       }

@@ -14,9 +14,15 @@
 - `tsc -b` cannot be used with `--skipLibCheck`.
 
 ## XMTP
-- Always enforce XMTP v3 by passing `enableV3: true` to `Client.create`.
-- Note: `enableV3` might not be in the type definitions yet, so use `// @ts-expect-error` if needed.
-- Use `XmtpConnectionModal` for connection UI.
+- **SDK**: Use `@xmtp/browser-sdk` (v5+). Do NOT use `@xmtp/xmtp-js`.
+- **Connection**: Use `Client.create(signer, { env })`.
+    - `signer` must be adapted to the SDK's `Signer` interface (requires `type`, `getIdentifier`, `signMessage`).
+    - `enableV3` is implicit/default in v5 (or handled via capabilities).
+- **Conversations**:
+    - Use `client.conversations.newDmWithIdentifier(identifier)` for DMs.
+    - `identifier` should be `{ identifierKind: 'Ethereum', identifier: address }`.
+- **Vite Config**: Do **NOT** alias `@xmtp/browser-sdk` to a local file (e.g., `src/lib/xmtp-browser-sdk.ts`) as it causes circular dependencies.
+- **Reference**: [XMTP LLM Chat Apps](https://raw.githubusercontent.com/xmtp/docs-xmtp-org/main/llms/llms-chat-apps.txt)
 
 ## Tech Stack Quirks
 - This is a Vite + React project.

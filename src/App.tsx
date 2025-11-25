@@ -3,7 +3,7 @@ import { Sidebar, SidebarHandle } from './components/notes/Sidebar';
 import { Editor } from './components/notes/Editor';
 import { EditorTabs } from './components/notes/EditorTabs';
 import { Note, Notebook, Folder, dbService, DB_NAME } from './lib/db';
-import type { BrowserClient } from '@xmtp/browser-sdk';
+import type { BrowserClient } from '@/lib/xmtp-browser-sdk';
 import { Key, AlertCircle } from 'lucide-react';
 import './App.css';
 import './DarkTheme.css';
@@ -62,7 +62,7 @@ const ImportPasswordModal: React.FC<{ fileName: string; onImport: (password: str
             autoFocus
           />
         </div>
-        {error && <p className="mb-2 text-xs text-red-600 dark:text-red-400 flex items-center"><AlertCircle size={14} className="mr-1"/>{error}</p>}
+        {error && <p className="mb-2 text-xs text-red-600 dark:text-red-400 flex items-center"><AlertCircle size={14} className="mr-1" />{error}</p>}
         <div className="flex justify-end space-x-2">
           <button onClick={onCancel} className="px-4 py-2 bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-100 rounded hover:bg-gray-300 dark:hover:bg-gray-500">
             Cancel
@@ -90,7 +90,7 @@ function App() {
   const [isXmtpConnecting, setIsXmtpConnecting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isDbBlocked, setIsDbBlocked] = useState(false);
-  const [toastMessage, setToastMessage] = useState<{title: string, description: string, variant?: 'default' | 'destructive'} | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ title: string, description: string, variant?: 'default' | 'destructive' } | null>(null);
   const [activeColumn, setActiveColumn] = useState<'notebooks' | 'notes' | 'editor'>('notes');
   const [importFile, setImportFile] = useState<File | null>(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -99,7 +99,7 @@ function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const savedTheme = localStorage.getItem('theme');
     if (!savedTheme) {
-        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     }
     return savedTheme === 'dark' ? 'dark' : 'light';
   });
@@ -107,8 +107,8 @@ function App() {
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme');
     const initialTheme = savedTheme === 'dark' ? 'dark' :
-                         (savedTheme === 'light' ? 'light' :
-                         (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+      (savedTheme === 'light' ? 'light' :
+        (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
     document.documentElement.setAttribute('data-theme', initialTheme);
     document.documentElement.classList.toggle('dark', initialTheme === 'dark');
   }, []);
@@ -124,18 +124,18 @@ function App() {
       const merged: Note = existing
         ? { ...existing, title: update.title, content: update.content, updatedAt: update.updatedAt }
         : {
-            id: update.noteId,
-            notebookId: update.notebookId,
-            folderId: null,
-            title: update.title,
-            content: update.content,
-            createdAt: update.updatedAt,
-            updatedAt: update.updatedAt,
-          };
+          id: update.noteId,
+          notebookId: update.notebookId,
+          folderId: null,
+          title: update.title,
+          content: update.content,
+          createdAt: update.updatedAt,
+          updatedAt: update.updatedAt,
+        };
 
       noteForDb = merged;
       const filtered = prevNotes.filter(n => n.id !== update.noteId);
-      return [...filtered, merged].sort((a,b) => b.updatedAt - a.updatedAt);
+      return [...filtered, merged].sort((a, b) => b.updatedAt - a.updatedAt);
     });
 
     if (noteForDb) {
@@ -168,8 +168,8 @@ function App() {
   const notebooksListRef = useRef<HTMLUListElement>(null);
 
   const getNoteById = (id: string | null): Note | null => {
-      if (!id) return null;
-      return notes.find(note => note.id === id) || null;
+    if (!id) return null;
+    return notes.find(note => note.id === id) || null;
   }
   const activeNote = getNoteById(activeNoteId);
 
@@ -180,8 +180,8 @@ function App() {
 
   const handleCreateNote = useCallback(async (folderId: string | null = null) => {
     if (!selectedNotebookId) {
-        showToast('Error', 'Please select a notebook first', 'destructive');
-        return null;
+      showToast('Error', 'Please select a notebook first', 'destructive');
+      return null;
     }
     try {
       console.log(`Creating note in folder: ${folderId}`);
@@ -192,7 +192,7 @@ function App() {
         folderId: folderId
       });
 
-      setNotes(prevNotes => [newNote, ...prevNotes].sort((a,b) => b.updatedAt - a.updatedAt));
+      setNotes(prevNotes => [newNote, ...prevNotes].sort((a, b) => b.updatedAt - a.updatedAt));
       setOpenNoteIds(prev => [...new Set([...prev, newNote.id])]);
       setActiveNoteId(newNote.id);
 
@@ -242,18 +242,18 @@ function App() {
   const focusColumn = (column: 'notebooks' | 'notes' | 'editor') => {
     setActiveColumn(column);
     if (column === 'notebooks') {
-        const targetButton = notebooksListRef.current?.querySelector(
-            selectedNotebookId ? `button[data-notebook-id="${selectedNotebookId}"]` : 'button'
-        ) as HTMLButtonElement | null;
-        targetButton?.focus();
+      const targetButton = notebooksListRef.current?.querySelector(
+        selectedNotebookId ? `button[data-notebook-id="${selectedNotebookId}"]` : 'button'
+      ) as HTMLButtonElement | null;
+      targetButton?.focus();
     } else if (column === 'notes') {
-        sidebarRef.current?.focusItem(activeNoteId ? 'note' : 'folder', activeNoteId);
+      sidebarRef.current?.focusItem(activeNoteId ? 'note' : 'folder', activeNoteId);
     } else if (column === 'editor') {
-        if (activeNote) {
-            editorTitleInputRef.current?.focus() || editorTextAreaRef.current?.focus();
-        } else {
-            editorRef.current?.focus();
-        }
+      if (activeNote) {
+        editorTitleInputRef.current?.focus() || editorTextAreaRef.current?.focus();
+      } else {
+        editorRef.current?.focus();
+      }
     }
   };
 
@@ -266,12 +266,12 @@ function App() {
         setNotebooks(allNotebooks);
 
         if (!selectedNotebookId) {
-            setSelectedNotebookId(defaultNotebook.id);
+          setSelectedNotebookId(defaultNotebook.id);
         } else {
-            const selectedExists = allNotebooks.some(nb => nb.id === selectedNotebookId);
-            if (!selectedExists) {
-                setSelectedNotebookId(defaultNotebook.id);
-            }
+          const selectedExists = allNotebooks.some(nb => nb.id === selectedNotebookId);
+          if (!selectedExists) {
+            setSelectedNotebookId(defaultNotebook.id);
+          }
         }
         setIsDbBlocked(false);
 
@@ -288,19 +288,19 @@ function App() {
   useEffect(() => {
     const loadNotes = async () => {
       if (!selectedNotebookId) {
-          setNotes([]);
-          setOpenNoteIds([]);
-          setActiveNoteId(null);
-          setFolders([]);
-          setIsLoading(false);
-          return;
+        setNotes([]);
+        setOpenNoteIds([]);
+        setActiveNoteId(null);
+        setFolders([]);
+        setIsLoading(false);
+        return;
       }
 
       setIsLoading(true);
       try {
         const notebookFolders = await dbService.getAllFolders(selectedNotebookId);
         setFolders(notebookFolders);
-        
+
         const notebookNotes = await dbService.getAllNotes(selectedNotebookId);
         setNotes(notebookNotes);
 
@@ -308,9 +308,9 @@ function App() {
         setOpenNoteIds([...new Set(validOpenNoteIds)]);
 
         if (activeNoteId && !validOpenNoteIds.includes(activeNoteId)) {
-            setActiveNoteId(validOpenNoteIds[0] || null);
+          setActiveNoteId(validOpenNoteIds[0] || null);
         } else if (!activeNoteId && validOpenNoteIds.length > 0) {
-            setActiveNoteId(validOpenNoteIds[0]);
+          setActiveNoteId(validOpenNoteIds[0]);
         }
 
       } catch (error) {
@@ -328,21 +328,21 @@ function App() {
   }, [selectedNotebookId]);
 
   const handleSelectNote = (note: Note) => {
-      if (!note) return;
-      if (!openNoteIds.includes(note.id)) {
-          setOpenNoteIds(prev => [...new Set([...prev, note.id])]);
-      }
-      setActiveNoteId(note.id);
+    if (!note) return;
+    if (!openNoteIds.includes(note.id)) {
+      setOpenNoteIds(prev => [...new Set([...prev, note.id])]);
+    }
+    setActiveNoteId(note.id);
   };
 
   const handleCloseTab = (noteIdToClose: string) => {
-      setOpenNoteIds(prev => prev.filter(id => id !== noteIdToClose));
-      if (activeNoteId === noteIdToClose) {
-          const currentIndex = openNoteIds.indexOf(noteIdToClose);
-          const nextActiveId = openNoteIds[currentIndex - 1] || openNoteIds[currentIndex + 1] || null;
-          const remainingOpenIds = openNoteIds.filter(id => id !== noteIdToClose);
-          setActiveNoteId(remainingOpenIds.find(id => id === nextActiveId) || remainingOpenIds[0] || null);
-      }
+    setOpenNoteIds(prev => prev.filter(id => id !== noteIdToClose));
+    if (activeNoteId === noteIdToClose) {
+      const currentIndex = openNoteIds.indexOf(noteIdToClose);
+      const nextActiveId = openNoteIds[currentIndex - 1] || openNoteIds[currentIndex + 1] || null;
+      const remainingOpenIds = openNoteIds.filter(id => id !== noteIdToClose);
+      setActiveNoteId(remainingOpenIds.find(id => id === nextActiveId) || remainingOpenIds[0] || null);
+    }
   };
 
   const handleUpdateNote = async (id: string, updates: Partial<Omit<Note, 'id' | 'createdAt' | 'updatedAt' | 'notebookId'>>) => {
@@ -367,7 +367,7 @@ function App() {
       setNotes(updatedNotes.sort((a, b) => b.updatedAt - a.updatedAt));
 
       if (openNoteIds.includes(id)) {
-          handleCloseTab(id);
+        handleCloseTab(id);
       }
 
       showToast('Success', 'Note deleted');
@@ -379,8 +379,8 @@ function App() {
 
   const handleCreateFolder = async (name: string, parentFolderId: string | null) => {
     if (!selectedNotebookId) {
-        showToast('Error', 'Please select a notebook first', 'destructive');
-        return;
+      showToast('Error', 'Please select a notebook first', 'destructive');
+      return;
     }
     try {
       const newFolder = await dbService.createFolder({
@@ -400,14 +400,14 @@ function App() {
   const handleDeleteFolder = async (folderId: string) => {
     try {
       await dbService.deleteFolder(folderId);
-      
+
       setFolders(folders.filter(folder => folder.id !== folderId));
-      
+
       if (selectedNotebookId) {
         const updatedNotes = await dbService.getAllNotes(selectedNotebookId);
         setNotes(updatedNotes);
       }
-      
+
       showToast('Success', 'Folder deleted');
     } catch (error) {
       console.error('Failed to delete folder:', error);
@@ -418,7 +418,7 @@ function App() {
   const handleUpdateFolder = async (folderId: string, updates: Partial<Omit<Folder, 'id' | 'createdAt' | 'updatedAt' | 'notebookId'>>) => {
     try {
       const updatedFolder = await dbService.updateFolder(folderId, updates);
-      
+
       if (updatedFolder) {
         setFolders(folders.map(folder => folder.id === folderId ? updatedFolder : folder));
         showToast('Success', 'Folder updated');
@@ -450,7 +450,7 @@ function App() {
   const handleMoveNoteToFolder = async (noteId: string, targetFolderId: string | null) => {
     try {
       const updatedNote = await dbService.moveNoteToFolder(noteId, targetFolderId);
-      
+
       if (updatedNote) {
         setNotes(notes.map(note => note.id === noteId ? updatedNote : note));
         showToast('Success', 'Note moved successfully');
@@ -468,7 +468,7 @@ function App() {
       console.log("IndexedDB deleted successfully.");
       showToast('Storage Cleared', 'Reloading application...');
       setTimeout(() => {
-          window.location.reload();
+        window.location.reload();
       }, 1500);
     } catch (error) {
       console.error("Failed to delete IndexedDB:", error);
@@ -512,9 +512,9 @@ function App() {
     if (isXmtpConnecting) return;
     console.log("App: Toggling XMTP Network...");
     const newEnv = xmtpNetworkEnv === 'dev' ? 'production' : 'dev';
-    handleXmtpDisconnect(); 
+    handleXmtpDisconnect();
     setXmtpNetworkEnv(newEnv);
-    setTimeout(() => handleXmtpConnectAttempt(), 100); 
+    setTimeout(() => handleXmtpConnectAttempt(), 100);
   };
 
   // --- Notebook Deletion --- 
@@ -540,17 +540,17 @@ function App() {
         const newSelectedId = remainingNotebooks[0]?.id || null;
         setSelectedNotebookId(newSelectedId);
         if (!newSelectedId) {
-            // Clear notes/folders if no notebook is selected
-            setNotes([]);
-            setFolders([]);
-            setOpenNoteIds([]);
-            setActiveNoteId(null);
+          // Clear notes/folders if no notebook is selected
+          setNotes([]);
+          setFolders([]);
+          setOpenNoteIds([]);
+          setActiveNoteId(null);
         }
 
         // Close the info modal if it was open for the deleted notebook
         // (Need to pass setInfoModalNotebook down or handle state differently)
         // For now, assumes modal is managed within Sidebar
-        
+
       } else {
         showToast('Error', 'Failed to delete notebook. Notebook not found.', 'destructive');
       }
@@ -577,18 +577,18 @@ function App() {
       // Basic validation
       if (!file.name.toLowerCase().endsWith('.json.encrypted') && !file.name.toLowerCase().endsWith('.json')) {
         showToast('Error', 'Invalid file type. Please select a .json.encrypted file.', 'destructive');
-        event.target.value = ''; 
+        event.target.value = '';
         return;
       }
       if (file.size > 50 * 1024 * 1024) { // 50MB limit
         showToast('Error', 'File too large (max 50MB)', 'destructive');
-        event.target.value = ''; 
+        event.target.value = '';
         return;
       }
       setImportFile(file);
       setShowPasswordModal(true);
     }
-    event.target.value = ''; 
+    event.target.value = '';
   };
 
   const handleImportWithPassword = async (password: string) => {
@@ -603,16 +603,16 @@ function App() {
       const decryptedData: ExportedData = await decryptBackup(password, wrapperJson);
 
       // --- Data Validation (Basic) --- 
-      if (!decryptedData || typeof decryptedData !== 'object' || 
-          !decryptedData.notebook || typeof decryptedData.notebook.name !== 'string' ||
-          !Array.isArray(decryptedData.folders) || !Array.isArray(decryptedData.notes)) {
-         throw new Error("Invalid file structure after decryption.");
+      if (!decryptedData || typeof decryptedData !== 'object' ||
+        !decryptedData.notebook || typeof decryptedData.notebook.name !== 'string' ||
+        !Array.isArray(decryptedData.folders) || !Array.isArray(decryptedData.notes)) {
+        throw new Error("Invalid file structure after decryption.");
       }
 
       // --- Database Import --- 
       // 1. Create the new notebook (key is derived, not stored)
-      const newNotebook = await dbService.createNotebook({ 
-          name: decryptedData.notebook.name || `Imported Notebook (${new Date().toLocaleTimeString()})`
+      const newNotebook = await dbService.createNotebook({
+        name: decryptedData.notebook.name || `Imported Notebook (${new Date().toLocaleTimeString()})`
       });
 
       // 2. Recreate folder structure
@@ -620,45 +620,45 @@ function App() {
       createdFolderMap.set(null, 'root'); // Represent root
 
       // Sort folders to process parents before children (simple path depth sort)
-      const sortedFolders = [...decryptedData.folders].sort((a, b) => 
-          (a.parentPath?.split('/').length ?? 0) - (b.parentPath?.split('/').length ?? 0)
+      const sortedFolders = [...decryptedData.folders].sort((a, b) =>
+        (a.parentPath?.split('/').length ?? 0) - (b.parentPath?.split('/').length ?? 0)
       );
 
       for (const exportedFolder of sortedFolders) {
-          const parentFolderId = createdFolderMap.get(exportedFolder.parentPath) ?? null;
-          if (parentFolderId === 'root') { // Root folder
-              const newFolder = await dbService.createFolder({ 
-                  notebookId: newNotebook.id, 
-                  name: exportedFolder.name, 
-                  parentFolderId: null 
-              });
-              createdFolderMap.set(exportedFolder.name, newFolder.id); // Map path to new ID
-          } else if (parentFolderId) { // Nested folder
-              const newFolder = await dbService.createFolder({ 
-                  notebookId: newNotebook.id, 
-                  name: exportedFolder.name, 
-                  parentFolderId: parentFolderId 
-              });
-              const currentPath = `${exportedFolder.parentPath}/${exportedFolder.name}`;
-              createdFolderMap.set(currentPath, newFolder.id);
-          } else {
-              console.warn(`Could not find parent folder ID for path: ${exportedFolder.parentPath}. Skipping folder: ${exportedFolder.name}`);
-          }
+        const parentFolderId = createdFolderMap.get(exportedFolder.parentPath) ?? null;
+        if (parentFolderId === 'root') { // Root folder
+          const newFolder = await dbService.createFolder({
+            notebookId: newNotebook.id,
+            name: exportedFolder.name,
+            parentFolderId: null
+          });
+          createdFolderMap.set(exportedFolder.name, newFolder.id); // Map path to new ID
+        } else if (parentFolderId) { // Nested folder
+          const newFolder = await dbService.createFolder({
+            notebookId: newNotebook.id,
+            name: exportedFolder.name,
+            parentFolderId: parentFolderId
+          });
+          const currentPath = `${exportedFolder.parentPath}/${exportedFolder.name}`;
+          createdFolderMap.set(currentPath, newFolder.id);
+        } else {
+          console.warn(`Could not find parent folder ID for path: ${exportedFolder.parentPath}. Skipping folder: ${exportedFolder.name}`);
+        }
       }
 
       // 3. Create notes
       for (const exportedNote of decryptedData.notes) {
-          const folderId = createdFolderMap.get(exportedNote.folderPath) ?? null;
-          const targetFolderId = folderId === 'root' ? null : folderId;
-          await dbService.createNote({ 
-              notebookId: newNotebook.id, 
-              folderId: targetFolderId,
-              title: exportedNote.title,
-              content: exportedNote.content,
-              // Consider using original timestamps or resetting them
-              // createdAt: exportedNote.createdAt, 
-              // updatedAt: exportedNote.updatedAt,
-          });
+        const folderId = createdFolderMap.get(exportedNote.folderPath) ?? null;
+        const targetFolderId = folderId === 'root' ? null : folderId;
+        await dbService.createNote({
+          notebookId: newNotebook.id,
+          folderId: targetFolderId,
+          title: exportedNote.title,
+          content: exportedNote.content,
+          // Consider using original timestamps or resetting them
+          // createdAt: exportedNote.createdAt, 
+          // updatedAt: exportedNote.updatedAt,
+        });
       }
 
       setNotebooks(nbs => [newNotebook, ...nbs]); // Add to UI list
@@ -771,49 +771,48 @@ function App() {
           >
             {isLoading ? (
               <div className="flex items-center justify-center h-full rounded-2xl border border-gray-200/70 dark:border-gray-800/70 bg-white/80 dark:bg-gray-900/80 mobile-card text-muted-foreground">
-                  Loading...
+                Loading...
               </div>
             ) : openNoteIds.length > 0 ? (
               <div className="flex h-full flex-col rounded-2xl border border-gray-200/70 dark:border-gray-800/70 bg-white/80 dark:bg-gray-900/80 shadow-lg shadow-gray-900/5 dark:shadow-black/20 backdrop-blur mobile-card">
-                  <EditorTabs
-                      notes={notes}
-                      openNoteIds={openNoteIds}
-                      activeNoteId={activeNoteId}
-                      onSelectTab={setActiveNoteId}
-                      onCloseTab={handleCloseTab}
+                <EditorTabs
+                  notes={notes}
+                  openNoteIds={openNoteIds}
+                  activeNoteId={activeNoteId}
+                  onSelectTab={setActiveNoteId}
+                  onCloseTab={handleCloseTab}
+                />
+                <div className="flex-1 overflow-auto scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 dark:scrollbar-thumb-gray-600 dark:hover:scrollbar-thumb-gray-500 p-4 lg:p-6">
+                  <Editor
+                    note={activeNote}
+                    onUpdateNote={handleUpdateNote}
+                    titleInputRef={editorTitleInputRef}
+                    textAreaRef={editorTextAreaRef}
                   />
-                  <div className="flex-1 overflow-auto scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 dark:scrollbar-thumb-gray-600 dark:hover:scrollbar-thumb-gray-500 p-4 lg:p-6">
-                      <Editor
-                        note={activeNote}
-                        onUpdateNote={handleUpdateNote}
-                        titleInputRef={editorTitleInputRef}
-                        textAreaRef={editorTextAreaRef}
-                      />
-                  </div>
+                </div>
               </div>
             ) : (
-               <div className="flex items-center justify-center h-full rounded-2xl border border-gray-200/70 dark:border-gray-800/70 bg-white/80 dark:bg-gray-900/80 text-gray-500 dark:text-gray-400 mobile-card">
-                  <p className="italic">Select a note to open it.</p>
+              <div className="flex items-center justify-center h-full rounded-2xl border border-gray-200/70 dark:border-gray-800/70 bg-white/80 dark:bg-gray-900/80 text-gray-500 dark:text-gray-400 mobile-card">
+                <p className="italic">Select a note to open it.</p>
               </div>
             )}
           </div>
         </div>
       </main>
-      
+
       {showPasswordModal && importFile && (
-         <ImportPasswordModal 
-             fileName={importFile.name}
-             onImport={handleImportWithPassword}
-             onCancel={handleCancelImport}
-         />
+        <ImportPasswordModal
+          fileName={importFile.name}
+          onImport={handleImportWithPassword}
+          onCancel={handleCancelImport}
+        />
       )}
 
       {toastMessage && (
-        <div className={`fixed bottom-4 right-4 p-4 rounded-md shadow-lg text-white ${ 
-          toastMessage.variant === 'destructive' 
-          ? 'bg-red-600 dark:bg-red-700' 
-          : 'bg-green-600 dark:bg-green-700'
-        }`}>
+        <div className={`fixed bottom-4 right-4 p-4 rounded-md shadow-lg text-white ${toastMessage.variant === 'destructive'
+            ? 'bg-red-600 dark:bg-red-700'
+            : 'bg-green-600 dark:bg-green-700'
+          }`}>
           <h3 className="font-bold">{toastMessage.title}</h3>
           <p>{toastMessage.description}</p>
         </div>

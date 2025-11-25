@@ -67,7 +67,7 @@ export function XmtpStatusIndicator({
           setIsModalOpen(false);
         }}
         onToggleNetwork={onToggleNetwork}
-        address={address}
+        address={address || undefined}
       />
     </>
   );

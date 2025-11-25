@@ -1,24 +1,35 @@
-import { Client, type Conversation, type DecodedMessage } from '@xmtp/xmtp-js';
-import { Wallet } from 'ethers';
+import { Client as XmtpClient, type ClientOptions } from '@xmtp/browser-sdk';
+import { Wallet, ethers } from 'ethers';
 
-export type BrowserClient = Client;
-export type BrowserConversation = Conversation;
-export type BrowserMessage = DecodedMessage;
+export type BrowserClient = XmtpClient;
 
-export interface BrowserClientOptions {
-  env?: 'dev' | 'production';
-  privateKey?: string;
-}
+export async function createBrowserClient(
+  options: { env: 'dev' | 'production' | 'local' }
+): Promise<{ client: BrowserClient; wallet: ethers.Signer }> {
+  const { env } = options;
 
-export async function createBrowserClient(options: BrowserClientOptions = {}) {
-  const env = options.env ?? 'dev';
-  const wallet = options.privateKey ? new Wallet(options.privateKey) : Wallet.createRandom();
-  const client = await Client.create(wallet, {
+  // Create a random wallet for testing/demo purposes
+  // In a real app, you would use a wallet connected via Wagmi or similar
+  const wallet = Wallet.createRandom();
+  const signer = {
+    getAddress: async () => await wallet.getAddress(),
+    signMessage: async (message: string) => await wallet.signMessage(message),
+  };
+
+  const sdkSigner = {
+    type: 'EOA' as const,
+    getIdentifier: async () => ({
+      identifier: await signer.getAddress(),
+      identifierKind: 'Ethereum' as const,
+    }),
+    signMessage: async (message: string) => {
+      const signature = await signer.signMessage(message);
+      return ethers.getBytes(signature);
+    },
+  };
+
+  const client = await XmtpClient.create(sdkSigner, {
     env,
-    persistConversations: true,
-    skipContactPublishing: false,
-    // @ts-expect-error enableV3 is not yet in the types but required for v3
-    enableV3: true,
   });
 
   return { client, wallet };

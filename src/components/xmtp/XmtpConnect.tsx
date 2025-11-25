@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { createBrowserClient } from '@xmtp/browser-sdk';
-import type { BrowserClient } from '@xmtp/browser-sdk';
+import { createBrowserClient } from '@/lib/xmtp-browser-sdk';
+import type { BrowserClient } from '@/lib/xmtp-browser-sdk';
 import type { XmtpEnv } from '@/utils/xmtp-utils';
 
 interface XmtpConnectProps {
@@ -56,9 +56,10 @@ export function XmtpConnect({
     setErrorMsg(null);
     try {
       const { client, wallet } = await createBrowserClient({ env: networkEnv });
-      addDebugLog(`Client created successfully: ${client.address}`);
+      const address = await wallet.getAddress();
+      addDebugLog(`Client created successfully: ${address}`);
       setStatus('connected');
-      onConnect(client, wallet.address, networkEnv);
+      onConnect(client, address, networkEnv);
     } catch (error: any) {
       const errorMessage = error?.message || 'Connection failed. Check console.';
       addDebugLog(`ERROR: ${errorMessage}`);

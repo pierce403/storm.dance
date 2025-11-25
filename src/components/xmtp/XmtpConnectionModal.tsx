@@ -4,16 +4,17 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Loader2, Wifi, WifiOff, AlertCircle } from 'lucide-react';
+import type { XmtpEnv } from '@/utils/xmtp-utils';
 
 interface XmtpConnectionModalProps {
     isOpen: boolean;
     onClose: () => void;
     status: 'disconnected' | 'connecting' | 'connected' | 'error';
-    networkEnv: 'dev' | 'production';
+    networkEnv: XmtpEnv;
     onConnect: () => void;
     onDisconnect: () => void;
     onToggleNetwork: () => void;
-    address: string | null;
+    address?: string;
     errorMsg?: string | null;
 }
 
