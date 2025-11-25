@@ -17,6 +17,8 @@ export async function createBrowserClient(options: BrowserClientOptions = {}) {
     env,
     persistConversations: true,
     skipContactPublishing: false,
+    // @ts-expect-error enableV3 is not yet in the types but required for v3
+    enableV3: true,
   });
 
   return { client, wallet };
