@@ -5,6 +5,9 @@
 - Build: `npm run build`
 - Dev server: `npm run dev`
 
+## Workflow
+- **Always** commit and push changes after every update or significant step.
+
 ## CI/CD
 - Use `actions/upload-pages-artifact@v4` and `actions/upload-artifact@v4`.
 - **Do not** use v3 of these actions as they are deprecated.
