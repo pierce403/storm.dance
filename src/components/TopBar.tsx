@@ -16,6 +16,9 @@ interface TopBarProps {
   onFileChange?: (event: React.ChangeEvent<HTMLInputElement>) => void;
   isImporting?: boolean;
   connectedNotebooksCount: number;
+  hasIdentity: boolean;
+  onCreateIdentity: () => void;
+  activeConversationsCount: number;
 }
 
 export function TopBar({
@@ -30,6 +33,9 @@ export function TopBar({
   onFileChange,
   isImporting = false,
   connectedNotebooksCount,
+  hasIdentity,
+  onCreateIdentity,
+  activeConversationsCount,
 }: TopBarProps) {
   return (
     <header className="sticky top-0 z-30 border-b border-gray-200/70 dark:border-gray-800/70 bg-white/70 dark:bg-gray-950/70 backdrop-blur-xl px-3 py-2">
@@ -72,6 +78,9 @@ export function TopBar({
               onDisconnect={onXmtpDisconnect}
               onToggleNetwork={onXmtpToggleNetwork}
               connectedNotebooksCount={connectedNotebooksCount}
+              hasIdentity={hasIdentity}
+              onCreateIdentity={onCreateIdentity}
+              activeConversationsCount={activeConversationsCount}
             />
           </div>
 

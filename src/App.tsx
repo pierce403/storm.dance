@@ -11,6 +11,7 @@ import { decryptBackup } from './lib/cryptoUtils';
 import { TopBar } from './components/TopBar';
 import { useNotebookCollaboration } from './hooks/useNotebookCollaboration';
 import type { CrdtUpdatePayload } from './lib/collaboration/types';
+import { IdentityUtils } from './utils/identity';
 
 // --- Types for Import --- 
 interface ExportedFolder {
@@ -95,6 +96,20 @@ function App() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [hasIdentity, setHasIdentity] = useState(false);
+  const [activeConversationsCount, setActiveConversationsCount] = useState(0);
+
+  useEffect(() => {
+    setHasIdentity(IdentityUtils.hasIdentity());
+  }, []);
+
+  const handleCreateIdentity = () => {
+    console.log("Creating new XMTP identity...");
+    const wallet = IdentityUtils.createRandomIdentity();
+    IdentityUtils.saveIdentity(wallet.privateKey);
+    setHasIdentity(true);
+    handleXmtpConnectAttempt();
+  };
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const savedTheme = localStorage.getItem('theme');
@@ -492,13 +507,20 @@ function App() {
     setXmtpStatus('connecting');
   };
 
-  const handleXmtpConnected = (client: BrowserClient, address: string, env: 'dev' | 'production') => {
+  const handleXmtpConnected = async (client: BrowserClient, address: string, env: 'dev' | 'production') => {
     console.log("App: XMTP Connected", { address, env });
     setXmtpClient(client);
     setUserAddress(address);
     setXmtpStatus('connected');
     setXmtpNetworkEnv(env);
     setIsXmtpConnecting(false);
+
+    try {
+      const conversations = await client.conversations.list();
+      setActiveConversationsCount(conversations.length);
+    } catch (e) {
+      console.error("Failed to fetch conversations", e);
+    }
   };
 
   const handleXmtpDisconnect = () => {
@@ -752,6 +774,9 @@ function App() {
         onFileChange={handleFileChange}
         isImporting={isImporting}
         connectedNotebooksCount={notebooks.filter(nb => !!nb.xmtpTopic).length}
+        hasIdentity={hasIdentity}
+        onCreateIdentity={handleCreateIdentity}
+        activeConversationsCount={activeConversationsCount}
       />
 
       <main className="flex-1 overflow-hidden pt-2">

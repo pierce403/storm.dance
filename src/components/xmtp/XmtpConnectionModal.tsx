@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Loader2, Wifi, WifiOff, AlertCircle } from 'lucide-react';
+import { Loader2, Wifi, WifiOff, AlertCircle, Copy, Check, Plus } from 'lucide-react';
 import type { XmtpEnv } from '@/utils/xmtp-utils';
 
 interface XmtpConnectionModalProps {
@@ -17,6 +17,9 @@ interface XmtpConnectionModalProps {
     address?: string;
     errorMsg?: string | null;
     connectedNotebooksCount: number;
+    hasIdentity: boolean;
+    onCreateIdentity: () => void;
+    activeConversationsCount: number;
 }
 
 export function XmtpConnectionModal({
@@ -30,9 +33,21 @@ export function XmtpConnectionModal({
     address,
     errorMsg,
     connectedNotebooksCount,
+    hasIdentity,
+    onCreateIdentity,
+    activeConversationsCount,
 }: XmtpConnectionModalProps) {
     const isConnecting = status === 'connecting';
     const isConnected = status === 'connected';
+    const [copied, setCopied] = useState(false);
+
+    const handleCopyAddress = () => {
+        if (address) {
+            navigator.clipboard.writeText(address);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        }
+    };
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
@@ -74,9 +89,28 @@ export function XmtpConnectionModal({
                         {address && (
                             <div className="flex flex-col space-y-1 mt-2">
                                 <span className="text-xs text-muted-foreground">Connected Identity</span>
-                                <code className="text-xs bg-muted p-1 rounded break-all">{address}</code>
+                                <div className="flex items-center space-x-2">
+                                    <code className="text-xs bg-muted p-1 rounded break-all flex-1">{address}</code>
+                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCopyAddress}>
+                                        {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
+                                    </Button>
+                                </div>
                             </div>
                         )}
+
+                        {isConnected && (
+                            <>
+                                <div className="flex justify-between items-center mt-2">
+                                    <span className="text-sm">Active Conversations</span>
+                                    <span className="font-medium">{activeConversationsCount}</span>
+                                </div>
+                                <div className="flex justify-between items-center mt-1">
+                                    <span className="text-sm">Messages Seen</span>
+                                    <span className="font-medium">0</span>
+                                </div>
+                            </>
+                        )}
+
                         <div className="flex justify-between items-center mt-2">
                             <span className="text-sm">Connected Notebooks</span>
                             <span className="font-medium">{connectedNotebooksCount}</span>
@@ -89,7 +123,7 @@ export function XmtpConnectionModal({
                     </div>
                 </div>
 
-                <DialogFooter className="sm:justify-between">
+                <DialogFooter className="sm:justify-between gap-2">
                     <Button variant="outline" onClick={onClose}>
                         Close
                     </Button>
@@ -98,10 +132,18 @@ export function XmtpConnectionModal({
                             Disconnect
                         </Button>
                     ) : (
-                        <Button onClick={onConnect} disabled={isConnecting}>
-                            {isConnecting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Connect
-                        </Button>
+                        <div className="flex gap-2">
+                            {!hasIdentity && (
+                                <Button onClick={onCreateIdentity} disabled={isConnecting} variant="secondary">
+                                    <Plus className="mr-2 h-4 w-4" />
+                                    New Identity
+                                </Button>
+                            )}
+                            <Button onClick={onConnect} disabled={isConnecting || !hasIdentity}>
+                                {isConnecting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                Connect
+                            </Button>
+                        </div>
                     )}
                 </DialogFooter>
             </DialogContent>

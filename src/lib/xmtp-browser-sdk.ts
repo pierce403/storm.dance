@@ -1,5 +1,6 @@
 import { Client as XmtpClient, type ClientOptions } from '@xmtp/browser-sdk';
 import { Wallet, ethers } from 'ethers';
+import { IdentityUtils } from '@/utils/identity';
 
 export type BrowserClient = XmtpClient;
 
@@ -8,19 +9,13 @@ export async function createBrowserClient(
 ): Promise<{ client: BrowserClient; wallet: ethers.Signer }> {
   const { env } = options;
 
-  // Create a random wallet for testing/demo purposes
-  // In a real app, you would use a wallet connected via Wagmi or similar
-  // Check for persisted key in localStorage (for testing/dev)
-  const storedKey = localStorage.getItem('XMTP_IDENTITY_KEY');
-  let wallet: ethers.Wallet | ethers.HDNodeWallet;
+  // Check for persisted key in localStorage
+  const wallet = IdentityUtils.loadIdentity();
 
-  if (storedKey) {
+  if (wallet) {
     console.log('Restoring XMTP identity from localStorage');
-    wallet = new ethers.Wallet(storedKey);
   } else {
-    console.log('Creating new ephemeral XMTP identity');
-    wallet = ethers.Wallet.createRandom();
-    localStorage.setItem('XMTP_IDENTITY_KEY', wallet.privateKey);
+    throw new Error('No XMTP identity found. Please create a new identity.');
   }
 
   // Adapter to match the SDK's expected Signer interface

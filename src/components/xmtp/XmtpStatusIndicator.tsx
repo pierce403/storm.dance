@@ -11,6 +11,9 @@ interface XmtpStatusIndicatorProps {
   onDisconnect: () => void;
   onToggleNetwork: () => void;
   connectedNotebooksCount: number;
+  hasIdentity: boolean;
+  onCreateIdentity: () => void;
+  activeConversationsCount: number;
 }
 
 export function XmtpStatusIndicator({
@@ -21,6 +24,9 @@ export function XmtpStatusIndicator({
   onDisconnect,
   onToggleNetwork,
   connectedNotebooksCount,
+  hasIdentity,
+  onCreateIdentity,
+  activeConversationsCount,
 }: XmtpStatusIndicatorProps) {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -99,6 +105,9 @@ export function XmtpStatusIndicator({
         onToggleNetwork={onToggleNetwork}
         address={address || undefined}
         connectedNotebooksCount={connectedNotebooksCount}
+        hasIdentity={hasIdentity}
+        onCreateIdentity={onCreateIdentity}
+        activeConversationsCount={activeConversationsCount}
       />
     </>
   );
