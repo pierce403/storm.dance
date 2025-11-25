@@ -19,6 +19,8 @@ interface TopBarProps {
   hasIdentity: boolean;
   onCreateIdentity: () => void;
   activeConversationsCount: number;
+  debugLoggingEnabled: boolean;
+  setDebugLoggingEnabled: (enabled: boolean) => void;
 }
 
 export function TopBar({
@@ -36,6 +38,8 @@ export function TopBar({
   hasIdentity,
   onCreateIdentity,
   activeConversationsCount,
+  debugLoggingEnabled,
+  setDebugLoggingEnabled,
 }: TopBarProps) {
   return (
     <header className="sticky top-0 z-30 border-b border-gray-200/70 dark:border-gray-800/70 bg-white/70 dark:bg-gray-950/70 backdrop-blur-xl px-3 py-2">
@@ -81,6 +85,8 @@ export function TopBar({
               hasIdentity={hasIdentity}
               onCreateIdentity={onCreateIdentity}
               activeConversationsCount={activeConversationsCount}
+              debugLoggingEnabled={debugLoggingEnabled}
+              setDebugLoggingEnabled={setDebugLoggingEnabled}
             />
           </div>
 

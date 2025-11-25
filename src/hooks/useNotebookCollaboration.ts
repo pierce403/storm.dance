@@ -12,9 +12,10 @@ interface UseNotebookCollaborationProps {
   userAddress: string | null;
   onRemoteUpdate: (update: CrdtUpdatePayload) => Promise<void> | void;
   ensResolver?: EnsResolver;
+  debugLoggingEnabled: boolean;
 }
 
-export function useNotebookCollaboration({ client: rawClient, userAddress, onRemoteUpdate, ensResolver }: UseNotebookCollaborationProps) {
+export function useNotebookCollaboration({ client: rawClient, userAddress, onRemoteUpdate, ensResolver, debugLoggingEnabled }: UseNotebookCollaborationProps) {
   const [contacts, setContacts] = useState<CollaborationContact[]>([]);
   const [status, setStatus] = useState<CollaborationStatus>('idle');
   const [sessionNotebookId, setSessionNotebookId] = useState<string | null>(null);
@@ -58,6 +59,9 @@ export function useNotebookCollaboration({ client: rawClient, userAddress, onRem
 
               const parsed = JSON.parse(content) as CollaborationMessage;
               if (parsed.type === 'invite') {
+                if (debugLoggingEnabled) {
+                  console.log(`[XMTP Incoming Invite]`, parsed.payload);
+                }
                 console.log("Received invite:", parsed.payload);
                 setInviteDetails(parsed.payload);
                 setInviteModalOpen(true);
@@ -127,7 +131,7 @@ export function useNotebookCollaboration({ client: rawClient, userAddress, onRem
       setStatus('starting');
       setSessionError(null);
       try {
-        const collabSession = new NotebookCollaborationSession({ notebookId, client, onRemoteUpdate });
+        const collabSession = new NotebookCollaborationSession({ notebookId, client, onRemoteUpdate, debugLoggingEnabled });
         await collabSession.start(contacts, notebookName);
         setSession(collabSession);
         setSessionNotebookId(notebookId);
@@ -192,7 +196,7 @@ export function useNotebookCollaboration({ client: rawClient, userAddress, onRem
 
     try {
       setStatus('starting');
-      const collabSession = new NotebookCollaborationSession({ notebookId: inviteDetails.notebookId, client, onRemoteUpdate });
+      const collabSession = new NotebookCollaborationSession({ notebookId: inviteDetails.notebookId, client, onRemoteUpdate, debugLoggingEnabled });
       // We join with the inviter
       await collabSession.start([inviterContact], inviteDetails.notebookName);
       setSession(collabSession);

@@ -34,12 +34,14 @@ export class NotebookCollaborationSession {
   private streamAbort = false;
   private sessionToken = 0;
   readonly topic: string;
+  private readonly debugLoggingEnabled: boolean;
 
-  constructor(params: { notebookId: string; client: XmtpClientLike; onRemoteUpdate: RemoteUpdateHandler }) {
+  constructor(params: { notebookId: string; client: XmtpClientLike; onRemoteUpdate: RemoteUpdateHandler; debugLoggingEnabled: boolean }) {
     this.client = params.client;
     this.notebookId = params.notebookId;
     this.onRemoteUpdate = params.onRemoteUpdate;
     this.topic = buildNotebookTopic(params.notebookId);
+    this.debugLoggingEnabled = params.debugLoggingEnabled;
   }
 
   async start(contacts: CollaborationContact[], notebookName: string) {
@@ -61,7 +63,11 @@ export class NotebookCollaborationSession {
           inviterAddress: this.client.address || '', // Fallback or ensure address is available
         };
         const inviteMsg: CollaborationMessage = { type: 'invite', payload: invitePayload };
-        await conversation.send(JSON.stringify(inviteMsg));
+        const serializedInvite = JSON.stringify(inviteMsg);
+        if (this.debugLoggingEnabled) {
+          console.log(`[XMTP Outgoing] Conversation: ${(conversation as any).topic}`, serializedInvite);
+        }
+        await conversation.send(serializedInvite);
 
         this.startStream(conversation, token);
         return [contact.address, conversation] as const;
@@ -91,7 +97,12 @@ export class NotebookCollaborationSession {
     });
 
     const serialized = JSON.stringify({ type: 'crdt-update', payload });
-    await Promise.all(Array.from(this.conversations.values()).map((conversation) => conversation.send(serialized)));
+    await Promise.all(Array.from(this.conversations.values()).map((conversation) => {
+      if (this.debugLoggingEnabled) {
+        console.log(`[XMTP Outgoing] Conversation: ${(conversation as any).topic}`, serialized);
+      }
+      return conversation.send(serialized);
+    }));
   }
 
   private async filterContacts(contacts: CollaborationContact[]) {
@@ -125,6 +136,12 @@ export class NotebookCollaborationSession {
       if (error || !message) return;
 
       if (message.senderInboxId === selfInboxId) return;
+
+      if (this.debugLoggingEnabled) {
+        const raw = typeof message.content === 'string' ? message.content : String(message.content);
+        console.log(`[XMTP Incoming] Conversation: ${(conversation as any).topic}`, raw);
+      }
+
       this.processMessage(message);
     }, () => {
       console.log("Stream failed");

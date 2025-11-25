@@ -14,6 +14,8 @@ interface XmtpStatusIndicatorProps {
   hasIdentity: boolean;
   onCreateIdentity: () => void;
   activeConversationsCount: number;
+  debugLoggingEnabled: boolean;
+  setDebugLoggingEnabled: (enabled: boolean) => void;
 }
 
 export function XmtpStatusIndicator({
@@ -27,6 +29,8 @@ export function XmtpStatusIndicator({
   hasIdentity,
   onCreateIdentity,
   activeConversationsCount,
+  debugLoggingEnabled,
+  setDebugLoggingEnabled,
 }: XmtpStatusIndicatorProps) {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -108,6 +112,8 @@ export function XmtpStatusIndicator({
         hasIdentity={hasIdentity}
         onCreateIdentity={onCreateIdentity}
         activeConversationsCount={activeConversationsCount}
+        debugLoggingEnabled={debugLoggingEnabled}
+        setDebugLoggingEnabled={setDebugLoggingEnabled}
       />
     </>
   );

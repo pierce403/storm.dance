@@ -98,6 +98,7 @@ function App() {
   const [isImporting, setIsImporting] = useState(false);
   const [hasIdentity, setHasIdentity] = useState(false);
   const [activeConversationsCount, setActiveConversationsCount] = useState(0);
+  const [debugLoggingEnabled, setDebugLoggingEnabled] = useState(false);
 
   useEffect(() => {
     setHasIdentity(IdentityUtils.hasIdentity());
@@ -177,6 +178,7 @@ function App() {
     client: xmtpClient,
     userAddress: userAddress,
     onRemoteUpdate: handleRemoteCrdtUpdate,
+    debugLoggingEnabled: debugLoggingEnabled,
   });
 
   const notesColumnRef = useRef<HTMLDivElement>(null);
@@ -777,6 +779,8 @@ function App() {
         hasIdentity={hasIdentity}
         onCreateIdentity={handleCreateIdentity}
         activeConversationsCount={activeConversationsCount}
+        debugLoggingEnabled={debugLoggingEnabled}
+        setDebugLoggingEnabled={setDebugLoggingEnabled}
       />
 
       <main className="flex-1 overflow-hidden pt-2">

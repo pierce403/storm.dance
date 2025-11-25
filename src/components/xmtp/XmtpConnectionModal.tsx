@@ -20,6 +20,8 @@ interface XmtpConnectionModalProps {
     hasIdentity: boolean;
     onCreateIdentity: () => void;
     activeConversationsCount: number;
+    debugLoggingEnabled: boolean;
+    setDebugLoggingEnabled: (enabled: boolean) => void;
 }
 
 export function XmtpConnectionModal({
@@ -36,6 +38,8 @@ export function XmtpConnectionModal({
     hasIdentity,
     onCreateIdentity,
     activeConversationsCount,
+    debugLoggingEnabled,
+    setDebugLoggingEnabled,
 }: XmtpConnectionModalProps) {
     const isConnecting = status === 'connecting';
     const isConnected = status === 'connected';
@@ -72,6 +76,20 @@ export function XmtpConnectionModal({
                             checked={networkEnv === 'production'}
                             onCheckedChange={onToggleNetwork}
                             disabled={isConnected || isConnecting}
+                        />
+                    </div>
+
+                    <div className="flex items-center justify-between space-x-2">
+                        <Label htmlFor="debug-logging" className="flex flex-col space-y-1">
+                            <span>Debug Logging</span>
+                            <span className="font-normal text-xs text-muted-foreground">
+                                Print messages to console
+                            </span>
+                        </Label>
+                        <Switch
+                            id="debug-logging"
+                            checked={debugLoggingEnabled}
+                            onCheckedChange={setDebugLoggingEnabled}
                         />
                     </div>
 
