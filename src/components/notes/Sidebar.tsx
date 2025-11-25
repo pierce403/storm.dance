@@ -713,31 +713,31 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                 </form>
               ) : (
                 <>
-                  <div
-                    className={`relative w-full flex items-center px-3 py-2 rounded-md text-sm group cursor-pointer ${selectedNotebookId === notebook.id ? "bg-gray-200 dark:bg-yellow-900/30 font-medium dark:text-yellow-100" : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
-                    onClick={() => onSelectNotebook(notebook.id)}
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        onSelectNotebook(notebook.id);
-                      }
-                    }}
-                    data-notebook-id={notebook.id}
-                  >
-                    <Book className="h-4 w-4 mr-2 flex-shrink-0 text-gray-500 dark:text-gray-400" />
-                    <span className="truncate flex-1 text-left mr-2">{notebook.name}</span>
+                  <div className={`relative w-full flex items-center rounded-md text-sm group ${selectedNotebookId === notebook.id ? "bg-gray-200 dark:bg-yellow-900/30 font-medium dark:text-yellow-100" : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}>
+                    <div
+                      className="flex-1 flex items-center px-3 py-2 cursor-pointer min-w-0"
+                      onClick={() => onSelectNotebook(notebook.id)}
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onSelectNotebook(notebook.id);
+                        }
+                      }}
+                      data-notebook-id={notebook.id}
+                    >
+                      <Book className="h-4 w-4 mr-2 flex-shrink-0 text-gray-500 dark:text-gray-400" />
+                      <span className="truncate text-left">{notebook.name}</span>
+                    </div>
 
                     {/* Action Buttons - Visible on Hover or Selected */}
-                    <div className={`flex items-center gap-1 transition-opacity ${selectedNotebookId === notebook.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                    <div className={`flex items-center gap-1 pr-2 transition-opacity ${selectedNotebookId === notebook.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                       <button
                         className="p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded hover:bg-gray-300 dark:hover:bg-gray-700"
                         onClick={(e) => {
-                          e.preventDefault();
                           e.stopPropagation();
                           handleRenameNotebookClick(notebook);
                         }}
-                        onMouseDown={(e) => e.stopPropagation()}
                         aria-label={`Rename notebook ${notebook.name}`}
                         title="Rename notebook"
                       >
@@ -746,11 +746,9 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                       <button
                         className="p-1 text-gray-400 hover:text-red-600 dark:text-gray-500 dark:hover:text-red-400 focus:outline-none focus:ring-1 focus:ring-red-400 rounded hover:bg-gray-300 dark:hover:bg-gray-700"
                         onClick={(e) => {
-                          e.preventDefault();
                           e.stopPropagation();
                           onDeleteNotebook(notebook.id);
                         }}
-                        onMouseDown={(e) => e.stopPropagation()}
                         aria-label={`Delete notebook ${notebook.name}`}
                         title="Delete notebook"
                       >
@@ -759,11 +757,9 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                       <button
                         className="p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 rounded hover:bg-gray-300 dark:hover:bg-gray-700"
                         onClick={(e) => {
-                          e.preventDefault();
                           e.stopPropagation();
                           setInfoModalNotebook(notebook);
                         }}
-                        onMouseDown={(e) => e.stopPropagation()}
                         aria-label={`Show info for notebook ${notebook.name}`}
                         title="Show notebook info"
                       >
