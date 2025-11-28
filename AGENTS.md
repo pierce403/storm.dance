@@ -8,6 +8,9 @@
 ## Workflow
 - **Always** commit and push changes after every update or significant step.
 
+## Documentation
+- When adding, removing, or modifying product capabilities, update `FEATURES.md` to keep the documented feature set in sync with the implementation and history.
+
 ## CI/CD & Deployment
 - **Workflows**:
     - `build.yml`: Runs on PRs and pushes to main. Verifies the build.
