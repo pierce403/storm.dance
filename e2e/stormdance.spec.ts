@@ -73,7 +73,10 @@ test.describe('storm.dance notes', () => {
   test.beforeEach(async ({ context, page }) => {
     await context.clearCookies();
     await page.addInitScript(() => {
-      window.localStorage.clear();
+      if (!window.sessionStorage.getItem('stormdance.e2e.localStorageReady')) {
+        window.localStorage.clear();
+        window.sessionStorage.setItem('stormdance.e2e.localStorageReady', 'true');
+      }
       window.localStorage.setItem('theme', 'light');
     });
   });
@@ -83,8 +86,8 @@ test.describe('storm.dance notes', () => {
 
     const createNote = page.getByRole('button', { name: 'Create new note', exact: true });
     await expect(createNote).toBeEnabled();
-    await expect(createNote).toHaveAttribute('aria-keyshortcuts', 'N');
-    await createNote.click();
+    await expect(createNote).toHaveAttribute('aria-keyshortcuts', 'Control+Alt+N Meta+Alt+N');
+    await page.keyboard.press('Control+Alt+N');
 
     const title = page.getByPlaceholder('Note Title');
     const content = page.getByPlaceholder('Start writing your note...');
@@ -103,7 +106,8 @@ test.describe('storm.dance notes', () => {
     await page.reload();
     await expect(page.getByRole('heading', { name: 'storm.dance' })).toBeVisible();
     await expect(noteButton).toBeVisible();
-    await noteButton.click();
+    await expect(noteButton).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: 'Open note E2E Note' })).toHaveAttribute('aria-selected', 'true');
 
     await expect(title).toHaveValue('E2E Note');
     await expect(content).toHaveValue('Line one\nLine two');
@@ -140,7 +144,10 @@ test.describe('storm.dance UX smoke checks', () => {
   test.beforeEach(async ({ context, page }) => {
     await context.clearCookies();
     await page.addInitScript(() => {
-      window.localStorage.clear();
+      if (!window.sessionStorage.getItem('stormdance.e2e.localStorageReady')) {
+        window.localStorage.clear();
+        window.sessionStorage.setItem('stormdance.e2e.localStorageReady', 'true');
+      }
       window.localStorage.setItem('theme', 'light');
     });
   });
@@ -183,5 +190,16 @@ test.describe('storm.dance UX smoke checks', () => {
 
     await expect(page.locator('html')).toHaveClass(/dark/);
     await expect(page.getByRole('button', { name: 'Switch to light mode' })).toBeVisible();
+  });
+
+  test('exposes browser-safe Obsidian hotkeys from the top bar', async ({ page }) => {
+    await openApp(page);
+
+    await page.getByRole('button', { name: 'Show browser-safe Obsidian hotkeys' }).click();
+    const hotkeys = page.getByRole('region', { name: 'Browser-safe Obsidian hotkeys' });
+
+    await expect(hotkeys).toBeVisible();
+    await expect(hotkeys).toContainText('Ctrl+Alt+N');
+    await expect(hotkeys).toContainText('Ctrl+Alt+1 / 2 / 3');
   });
 });

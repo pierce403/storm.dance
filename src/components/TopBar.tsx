@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { XmtpStatusIndicator } from '../components/xmtp/XmtpStatusIndicator';
 import { IpfsStatusIndicator } from '../components/ipfs/IpfsStatusIndicator';
-import { Sun, Moon, Upload } from 'lucide-react';
+import { Keyboard, Sun, Moon, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface TopBarProps {
@@ -41,8 +41,13 @@ export function TopBar({
   debugLoggingEnabled,
   setDebugLoggingEnabled,
 }: TopBarProps) {
+  const [showHotkeys, setShowHotkeys] = useState(false);
+
   return (
-    <header className="sticky top-0 z-30 border-b border-gray-200/70 dark:border-gray-800/70 bg-white/70 dark:bg-gray-950/70 backdrop-blur-xl px-3 py-2">
+    <header
+      className="sticky top-0 z-30 border-b border-gray-200/70 dark:border-gray-800/70 bg-white/70 dark:bg-gray-950/70 backdrop-blur-xl px-3 py-2"
+      aria-label="Application toolbar"
+    >
       <div className="flex flex-wrap items-center gap-3 justify-between">
         {/* Left side: App title */}
         <div className="flex items-center gap-2">
@@ -101,6 +106,43 @@ export function TopBar({
               debugLoggingEnabled={debugLoggingEnabled}
               setDebugLoggingEnabled={setDebugLoggingEnabled}
             />
+          </div>
+
+          <div className="relative">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowHotkeys((isOpen) => !isOpen)}
+              className="h-9 w-9 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
+              aria-label="Show browser-safe Obsidian hotkeys"
+              aria-expanded={showHotkeys}
+              aria-controls="hotkeys-panel"
+            >
+              <Keyboard className="h-4 w-4" />
+            </Button>
+            {showHotkeys && (
+              <div
+                id="hotkeys-panel"
+                role="region"
+                aria-label="Browser-safe Obsidian hotkeys"
+                className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 bg-white p-4 text-left text-xs shadow-xl dark:border-gray-700 dark:bg-gray-900"
+              >
+                <h2 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">Browser-safe Obsidian hotkeys</h2>
+                <p className="mb-3 text-gray-600 dark:text-gray-300">Use Ctrl+Alt on Windows/Linux or Cmd+Option on macOS.</p>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-gray-700 dark:text-gray-200">
+                  <dt className="font-mono text-[11px] text-gray-900 dark:text-yellow-100">Ctrl+Alt+N</dt>
+                  <dd>Create a note</dd>
+                  <dt className="font-mono text-[11px] text-gray-900 dark:text-yellow-100">Ctrl+Alt+S</dt>
+                  <dd>Confirm local save state</dd>
+                  <dt className="font-mono text-[11px] text-gray-900 dark:text-yellow-100">Ctrl+Alt+[ / ]</dt>
+                  <dd>Move across open note tabs</dd>
+                  <dt className="font-mono text-[11px] text-gray-900 dark:text-yellow-100">Ctrl+Alt+1 / 2 / 3</dt>
+                  <dd>Focus notebooks, notes, or editor</dd>
+                  <dt className="font-mono text-[11px] text-gray-900 dark:text-yellow-100">Tab / Shift+Tab</dt>
+                  <dd>Cycle columns when not typing</dd>
+                </dl>
+              </div>
+            )}
           </div>
 
           <Button

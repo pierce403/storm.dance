@@ -34,10 +34,12 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - Title and content edits persist to IndexedDB.
   - Reloading the app preserves saved notes.
   - Recently opened notes appear as tabs.
+  - Selected notebook, open note tabs, and active note are restored from local storage after page refresh.
   - Sidebar selection and editor state stay synchronized.
   - Deleting a note removes it from the sidebar and any open editor tab.
 - **Test Criteria**:
   - [x] Playwright creates, edits, reloads, reopens, and deletes a note.
+  - [x] Playwright verifies the active note tab is restored after reload.
   - [x] Vitest covers collaboration-side note data behavior.
   - [ ] Markdown preview behavior is verified once preview controls are active.
 
@@ -79,11 +81,14 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - A top-bar control switches between light and dark themes and persists the preference to local storage.
   - The initial theme uses stored preference first, then system preference.
   - IPFS and XMTP status indicators remain visible in the top bar.
+  - A live workspace status summarizes the selected notebook, selected note, content counts, editor state, and connection state for assistive tools and LLM-driven browsers.
+  - Browser-safe Obsidian-style hotkeys are available from the top bar and use Ctrl+Alt on Windows/Linux or Cmd+Option on macOS.
   - Blocked IndexedDB upgrades show a recovery screen with guidance and storage-clear action.
 - **Test Criteria**:
   - [x] Playwright checks desktop and mobile shell screenshots.
   - [x] Playwright checks for horizontal overflow at desktop and mobile widths.
   - [x] Playwright verifies the light-to-dark theme toggle state change.
+  - [x] Playwright verifies workspace status, selected ARIA state, and hotkey help visibility.
 
 ### XMTP Identity and Connection Management
 - **Stability**: in-progress

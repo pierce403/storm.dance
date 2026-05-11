@@ -33,6 +33,37 @@ interface ExportedData {
   notes: ExportedNote[];
 }
 
+const WORKSPACE_STORAGE_KEYS = {
+  selectedNotebookId: 'stormdance.workspace.selectedNotebookId',
+  openNoteIds: 'stormdance.workspace.openNoteIds',
+  activeNoteId: 'stormdance.workspace.activeNoteId',
+} as const;
+
+const readStoredString = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+const readStoredStringArray = (key: string): string[] => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || '[]');
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+
+const storeNullableString = (key: string, value: string | null) => {
+  if (value) {
+    localStorage.setItem(key, value);
+  } else {
+    localStorage.removeItem(key);
+  }
+};
+
 // --- Import Password Modal --- 
 const ImportPasswordModal: React.FC<{ fileName: string; onImport: (password: string) => void; onCancel: () => void }> = ({ fileName, onImport, onCancel }) => {
   const [password, setPassword] = useState('');
@@ -79,11 +110,11 @@ const ImportPasswordModal: React.FC<{ fileName: string; onImport: (password: str
 
 function App() {
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
-  const [selectedNotebookId, setSelectedNotebookId] = useState<string | null>(null);
+  const [selectedNotebookId, setSelectedNotebookId] = useState<string | null>(() => readStoredString(WORKSPACE_STORAGE_KEYS.selectedNotebookId));
   const [notes, setNotes] = useState<Note[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
-  const [openNoteIds, setOpenNoteIds] = useState<string[]>([]);
-  const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
+  const [openNoteIds, setOpenNoteIds] = useState<string[]>(() => readStoredStringArray(WORKSPACE_STORAGE_KEYS.openNoteIds));
+  const [activeNoteId, setActiveNoteId] = useState<string | null>(() => readStoredString(WORKSPACE_STORAGE_KEYS.activeNoteId));
   const [xmtpClient, setXmtpClient] = useState<BrowserClient | null>(null);
   const [userAddress, setUserAddress] = useState<string | null>(null);
   const [xmtpStatus, setXmtpStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
@@ -183,6 +214,10 @@ function App() {
 
   const sidebarRef = useRef<SidebarHandle>(null);
   const notebooksListRef = useRef<HTMLUListElement>(null);
+  const notesMutationVersionRef = useRef(0);
+  const selectedNotebookIdRef = useRef(selectedNotebookId);
+  const openNoteIdsRef = useRef(openNoteIds);
+  const activeNoteIdRef = useRef(activeNoteId);
 
   const getNoteById = (id: string | null): Note | null => {
     if (!id) return null;
@@ -203,10 +238,44 @@ function App() {
       `Collaboration status: ${collaborationStatus}.`,
     ].join(' ');
 
-  const showToast = (title: string, description: string, variant: 'default' | 'destructive' = 'default') => {
+  const showToast = useCallback((title: string, description: string, variant: 'default' | 'destructive' = 'default') => {
     setToastMessage({ title, description, variant });
     setTimeout(() => setToastMessage(null), 3000);
-  };
+  }, []);
+
+  const setSelectedNotebookIdAndStore = useCallback((nextNotebookId: string | null) => {
+    selectedNotebookIdRef.current = nextNotebookId;
+    setSelectedNotebookId(nextNotebookId);
+    storeNullableString(WORKSPACE_STORAGE_KEYS.selectedNotebookId, nextNotebookId);
+  }, []);
+
+  const setOpenNoteIdsAndStore = useCallback((nextOpenNoteIds: string[]) => {
+    const uniqueOpenNoteIds = [...new Set(nextOpenNoteIds)];
+    openNoteIdsRef.current = uniqueOpenNoteIds;
+    setOpenNoteIds(uniqueOpenNoteIds);
+    localStorage.setItem(WORKSPACE_STORAGE_KEYS.openNoteIds, JSON.stringify(uniqueOpenNoteIds));
+  }, []);
+
+  const setActiveNoteIdAndStore = useCallback((nextActiveNoteId: string | null) => {
+    activeNoteIdRef.current = nextActiveNoteId;
+    setActiveNoteId(nextActiveNoteId);
+    storeNullableString(WORKSPACE_STORAGE_KEYS.activeNoteId, nextActiveNoteId);
+  }, []);
+
+  useEffect(() => {
+    selectedNotebookIdRef.current = selectedNotebookId;
+    storeNullableString(WORKSPACE_STORAGE_KEYS.selectedNotebookId, selectedNotebookId);
+  }, [selectedNotebookId]);
+
+  useEffect(() => {
+    openNoteIdsRef.current = openNoteIds;
+    localStorage.setItem(WORKSPACE_STORAGE_KEYS.openNoteIds, JSON.stringify(openNoteIds));
+  }, [openNoteIds]);
+
+  useEffect(() => {
+    activeNoteIdRef.current = activeNoteId;
+    storeNullableString(WORKSPACE_STORAGE_KEYS.activeNoteId, activeNoteId);
+  }, [activeNoteId]);
 
   const handleCreateNote = useCallback(async (folderId: string | null = null) => {
     if (!selectedNotebookId) {
@@ -221,10 +290,11 @@ function App() {
         content: '',
         folderId: folderId
       });
+      notesMutationVersionRef.current += 1;
 
       setNotes(prevNotes => [newNote, ...prevNotes].sort((a, b) => b.updatedAt - a.updatedAt));
-      setOpenNoteIds(prev => [...new Set([...prev, newNote.id])]);
-      setActiveNoteId(newNote.id);
+      setOpenNoteIdsAndStore([...openNoteIdsRef.current, newNote.id]);
+      setActiveNoteIdAndStore(newNote.id);
 
       setTimeout(() => {
         sidebarRef.current?.focusItem('note', newNote.id);
@@ -238,10 +308,74 @@ function App() {
       showToast('Error', 'Failed to create note', 'destructive');
       return null;
     }
-  }, [selectedNotebookId, showToast]);
+  }, [selectedNotebookId, setActiveNoteIdAndStore, setOpenNoteIdsAndStore, showToast]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: globalThis.KeyboardEvent) => {
+      const isBrowserSafeCommand = (e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey;
+      if (isBrowserSafeCommand) {
+        const focusColumn = (column: 'notebooks' | 'notes' | 'editor') => {
+          e.preventDefault();
+          setActiveColumn(column);
+          window.setTimeout(() => {
+            if (column === 'notebooks') {
+              const selectedNotebookSelector = selectedNotebookId ? `[data-notebook-id="${selectedNotebookId}"]` : '[data-notebook-id]';
+              document.querySelector<HTMLButtonElement>(selectedNotebookSelector)?.focus();
+            } else if (column === 'notes') {
+              sidebarRef.current?.focusItem(activeNoteId ? 'note' : null, activeNoteId);
+            } else if (column === 'editor') {
+              if (activeNote) {
+                editorTitleInputRef.current?.focus();
+              } else {
+                editorRef.current?.focus();
+              }
+            }
+          }, 0);
+        };
+
+        if (e.key.toLowerCase() === 'n') {
+          e.preventDefault();
+          handleCreateNote();
+          return;
+        }
+
+        if (e.key.toLowerCase() === 's') {
+          e.preventDefault();
+          showToast(
+            activeNote ? 'Saved locally' : 'Workspace ready',
+            activeNote ? `"${activeNote.title || 'Untitled'}" is already saved locally.` : 'There is no open note to save.'
+          );
+          return;
+        }
+
+        if (e.key === '[' || e.key === ']') {
+          e.preventDefault();
+          if (openNoteIds.length === 0) return;
+          const direction = e.key === '[' ? -1 : 1;
+          const currentIndex = activeNoteId ? openNoteIds.indexOf(activeNoteId) : -1;
+          const nextIndex = currentIndex >= 0
+            ? (currentIndex + direction + openNoteIds.length) % openNoteIds.length
+            : 0;
+          setActiveNoteIdAndStore(openNoteIds[nextIndex]);
+          return;
+        }
+
+        if (e.key === '1') {
+          focusColumn('notebooks');
+          return;
+        }
+
+        if (e.key === '2') {
+          focusColumn('notes');
+          return;
+        }
+
+        if (e.key === '3') {
+          focusColumn('editor');
+          return;
+        }
+      }
+
       if (e.key !== 'Tab') return;
 
       const target = e.target as HTMLElement | null;
@@ -294,7 +428,7 @@ function App() {
     return () => {
       document.removeEventListener('keydown', handleGlobalKeyDown);
     };
-  }, [activeColumn, activeNote, activeNoteId, selectedNotebookId]);
+  }, [activeColumn, activeNote, activeNoteId, handleCreateNote, openNoteIds, selectedNotebookId, setActiveNoteIdAndStore, showToast]);
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -305,11 +439,11 @@ function App() {
         setNotebooks(allNotebooks);
 
         if (!selectedNotebookId) {
-          setSelectedNotebookId(defaultNotebook.id);
+          setSelectedNotebookIdAndStore(defaultNotebook.id);
         } else {
           const selectedExists = allNotebooks.some(nb => nb.id === selectedNotebookId);
           if (!selectedExists) {
-            setSelectedNotebookId(defaultNotebook.id);
+            setSelectedNotebookIdAndStore(defaultNotebook.id);
           }
         }
         setIsDbBlocked(false);
@@ -327,8 +461,8 @@ function App() {
     const loadNotes = async () => {
       if (!selectedNotebookId) {
         setNotes([]);
-        setOpenNoteIds([]);
-        setActiveNoteId(null);
+        setOpenNoteIdsAndStore([]);
+        setActiveNoteIdAndStore(null);
         setFolders([]);
         setIsLoading(false);
         return;
@@ -336,50 +470,57 @@ function App() {
 
       setIsLoading(true);
       try {
+        const loadStartedAtVersion = notesMutationVersionRef.current;
         const notebookFolders = await dbService.getAllFolders(selectedNotebookId);
         setFolders(notebookFolders);
 
-        const notebookNotes = await dbService.getAllNotes(selectedNotebookId);
+        let notebookNotes = await dbService.getAllNotes(selectedNotebookId);
+        const notesChangedDuringLoad = loadStartedAtVersion !== notesMutationVersionRef.current;
+        if (notesChangedDuringLoad) {
+          notebookNotes = await dbService.getAllNotes(selectedNotebookId);
+        }
         setNotes(notebookNotes);
 
-        const validOpenNoteIds = openNoteIds.filter(id => notebookNotes.some(n => n.id === id));
-        setOpenNoteIds([...new Set(validOpenNoteIds)]);
+        const validOpenNoteIds = openNoteIdsRef.current.filter(id => notebookNotes.some(n => n.id === id));
+        setOpenNoteIdsAndStore(validOpenNoteIds);
 
-        if (activeNoteId && !validOpenNoteIds.includes(activeNoteId)) {
-          setActiveNoteId(validOpenNoteIds[0] || null);
-        } else if (!activeNoteId && validOpenNoteIds.length > 0) {
-          setActiveNoteId(validOpenNoteIds[0]);
+        const currentActiveNoteId = activeNoteIdRef.current;
+        if (currentActiveNoteId && !validOpenNoteIds.includes(currentActiveNoteId)) {
+          setActiveNoteIdAndStore(validOpenNoteIds[0] || null);
+        } else if (!currentActiveNoteId && validOpenNoteIds.length > 0) {
+          setActiveNoteIdAndStore(validOpenNoteIds[0]);
         }
 
       } catch (error) {
         console.error('Failed to load notes for notebook:', error);
         showToast('Error', 'Failed to load notes', 'destructive');
         setNotes([]);
-        setOpenNoteIds([]);
-        setActiveNoteId(null);
+        setOpenNoteIdsAndStore([]);
+        setActiveNoteIdAndStore(null);
       } finally {
         setIsLoading(false);
       }
     };
 
     loadNotes();
-  }, [selectedNotebookId]);
+  }, [selectedNotebookId, setActiveNoteIdAndStore, setOpenNoteIdsAndStore, showToast]);
 
   const handleSelectNote = (note: Note) => {
     if (!note) return;
-    if (!openNoteIds.includes(note.id)) {
-      setOpenNoteIds(prev => [...new Set([...prev, note.id])]);
+    if (!openNoteIdsRef.current.includes(note.id)) {
+      setOpenNoteIdsAndStore([...openNoteIdsRef.current, note.id]);
     }
-    setActiveNoteId(note.id);
+    setActiveNoteIdAndStore(note.id);
   };
 
   const handleCloseTab = (noteIdToClose: string) => {
-    setOpenNoteIds(prev => prev.filter(id => id !== noteIdToClose));
-    if (activeNoteId === noteIdToClose) {
-      const currentIndex = openNoteIds.indexOf(noteIdToClose);
-      const nextActiveId = openNoteIds[currentIndex - 1] || openNoteIds[currentIndex + 1] || null;
-      const remainingOpenIds = openNoteIds.filter(id => id !== noteIdToClose);
-      setActiveNoteId(remainingOpenIds.find(id => id === nextActiveId) || remainingOpenIds[0] || null);
+    const currentOpenNoteIds = openNoteIdsRef.current;
+    const remainingOpenIds = currentOpenNoteIds.filter(id => id !== noteIdToClose);
+    setOpenNoteIdsAndStore(remainingOpenIds);
+    if (activeNoteIdRef.current === noteIdToClose) {
+      const currentIndex = currentOpenNoteIds.indexOf(noteIdToClose);
+      const nextActiveId = currentOpenNoteIds[currentIndex - 1] || currentOpenNoteIds[currentIndex + 1] || null;
+      setActiveNoteIdAndStore(remainingOpenIds.find(id => id === nextActiveId) || remainingOpenIds[0] || null);
     }
   };
 
@@ -400,11 +541,12 @@ function App() {
   const handleDeleteNote = async (id: string) => {
     try {
       await dbService.deleteNote(id);
+      notesMutationVersionRef.current += 1;
 
       const updatedNotes = notes.filter(note => note.id !== id);
       setNotes(updatedNotes.sort((a, b) => b.updatedAt - a.updatedAt));
 
-      if (openNoteIds.includes(id)) {
+      if (openNoteIdsRef.current.includes(id)) {
         handleCloseTab(id);
       }
 
@@ -566,7 +708,7 @@ function App() {
     try {
       const newNotebook = await dbService.createNotebook({ name });
       setNotebooks(prev => [...prev, newNotebook]);
-      setSelectedNotebookId(newNotebook.id);
+      setSelectedNotebookIdAndStore(newNotebook.id);
       showToast('Success', `Notebook "${name}" created`);
     } catch (error) {
       console.error('Failed to create notebook:', error);
@@ -608,13 +750,13 @@ function App() {
 
         // Select the first remaining notebook or null if none left
         const newSelectedId = remainingNotebooks[0]?.id || null;
-        setSelectedNotebookId(newSelectedId);
+        setSelectedNotebookIdAndStore(newSelectedId);
         if (!newSelectedId) {
           // Clear notes/folders if no notebook is selected
           setNotes([]);
           setFolders([]);
-          setOpenNoteIds([]);
-          setActiveNoteId(null);
+          setOpenNoteIdsAndStore([]);
+          setActiveNoteIdAndStore(null);
         }
 
         // Close the info modal if it was open for the deleted notebook
@@ -733,7 +875,7 @@ function App() {
       }
 
       setNotebooks(nbs => [newNotebook, ...nbs]); // Add to UI list
-      setSelectedNotebookId(newNotebook.id); // Select the newly imported notebook
+      setSelectedNotebookIdAndStore(newNotebook.id); // Select the newly imported notebook
       showToast('Success', `Notebook '${newNotebook.name}' imported successfully.`);
 
     } catch (error) {
@@ -806,8 +948,7 @@ function App() {
       <main
         className="min-h-0 flex-1 overflow-hidden pt-2"
         aria-label="Stormdance workspace"
-        aria-describedby="workspace-status"
-        aria-keyshortcuts="Tab Shift+Tab"
+        aria-keyshortcuts="Tab Shift+Tab Control+Alt+N Meta+Alt+N Control+Alt+S Meta+Alt+S Control+Alt+[ Meta+Alt+[ Control+Alt+] Meta+Alt+] Control+Alt+1 Meta+Alt+1 Control+Alt+2 Meta+Alt+2 Control+Alt+3 Meta+Alt+3"
       >
         <div className="flex h-full min-h-0 flex-col gap-3 lg:flex-row lg:gap-4">
           <div
@@ -828,7 +969,7 @@ function App() {
               notes={notes}
               folders={folders}
               selectedNoteId={activeNoteId}
-              onSelectNotebook={setSelectedNotebookId}
+              onSelectNotebook={setSelectedNotebookIdAndStore}
               onSelectNote={handleSelectNote}
               onCreateNote={handleCreateNote}
               onDeleteNote={handleDeleteNote}
@@ -863,7 +1004,6 @@ function App() {
             onFocus={() => setActiveColumn('editor')}
             role="region"
             aria-label={activeNote ? `Editor for note ${activeNote.title || 'Untitled'}` : 'Editor'}
-            aria-describedby="workspace-status"
           >
             {isLoading ? (
               <div className="flex items-center justify-center h-full rounded-2xl border border-gray-200/70 dark:border-gray-800/70 bg-white/80 dark:bg-gray-900/80 mobile-card text-muted-foreground">
@@ -875,7 +1015,7 @@ function App() {
                   notes={notes}
                   openNoteIds={openNoteIds}
                   activeNoteId={activeNoteId}
-                  onSelectTab={setActiveNoteId}
+                  onSelectTab={setActiveNoteIdAndStore}
                   onCloseTab={handleCloseTab}
                 />
                 <div className="min-h-0 flex-1 overflow-auto scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 dark:scrollbar-thumb-gray-600 dark:hover:scrollbar-thumb-gray-500 p-4 lg:p-6">

@@ -662,7 +662,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
       tabIndex={-1}
       role="navigation"
       aria-label="Notebook and note navigation"
-      aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Enter N"
+      aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Enter Control+Alt+N Meta+Alt+N"
       className="h-full flex flex-col border-r focus:outline-none"
     >
 
@@ -800,10 +800,10 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
             <button
               className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800 disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-yellow-400"
               onClick={() => onCreateNote()} // Use onCreateNote directly
-              title="Create new note (n)"
+              title="Create new note (Ctrl+Alt+N)"
               disabled={!selectedNotebookId || isLoading}
               aria-label="Create new note"
-              aria-keyshortcuts="N"
+              aria-keyshortcuts="Control+Alt+N Meta+Alt+N"
               tabIndex={-1}
             >
               <Plus className="h-5 w-5" />
