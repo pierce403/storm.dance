@@ -77,6 +77,7 @@ When working on this project, update this file whenever you learn something dura
 - Uses Tailwind CSS for styling.
 - Uses `lucide-react` for icons.
 - `FEATURES.md` replaced the old `TECHNOLOGY.md`; put feature specs and technology constraints there.
+- `vite.config.ts` defines `__APP_VERSION__` from `package.json` and `__APP_BUILD_TIME__` from the current build timestamp for the top-bar app info dialog.
 
 ## Known Issues & Solutions
 - `npm install` may fail in sandboxed environments with `EAI_AGAIN`; rerun with network approval when dependency downloads are required.

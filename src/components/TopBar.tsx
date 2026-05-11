@@ -1,8 +1,16 @@
 import React, { useState } from 'react';
 import { XmtpStatusIndicator } from '../components/xmtp/XmtpStatusIndicator';
 import { IpfsStatusIndicator } from '../components/ipfs/IpfsStatusIndicator';
-import { Keyboard, Sun, Moon, Upload } from 'lucide-react';
+import { Info, Keyboard, Sun, Moon, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 
 interface TopBarProps {
   theme: 'light' | 'dark';
@@ -42,6 +50,17 @@ export function TopBar({
   setDebugLoggingEnabled,
 }: TopBarProps) {
   const [showHotkeys, setShowHotkeys] = useState(false);
+  const buildDate = new Date(__APP_BUILD_TIME__);
+  const buildTimeLabel = Number.isNaN(buildDate.getTime())
+    ? __APP_BUILD_TIME__
+    : buildDate.toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    });
 
   return (
     <header
@@ -54,6 +73,36 @@ export function TopBar({
           <div className="h-9 w-9 rounded-2xl flex items-center justify-center">
             <img src="/logo.svg" alt="STORMDANCE Logo" className="h-full w-full" />
           </div>
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-full text-gray-500 hover:bg-gray-200 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                aria-label="Show app information"
+              >
+                <Info className="h-4 w-4" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Stormdance information</DialogTitle>
+                <DialogDescription>
+                  Version and build metadata for this running app.
+                </DialogDescription>
+              </DialogHeader>
+              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-3 text-sm">
+                <dt className="font-medium text-gray-600 dark:text-gray-300">Version</dt>
+                <dd className="font-mono text-gray-900 dark:text-gray-100">{__APP_VERSION__}</dd>
+                <dt className="font-medium text-gray-600 dark:text-gray-300">Build time</dt>
+                <dd className="font-mono text-gray-900 dark:text-gray-100">
+                  <time dateTime={__APP_BUILD_TIME__}>{buildTimeLabel}</time>
+                </dd>
+                <dt className="font-medium text-gray-600 dark:text-gray-300">Build ISO</dt>
+                <dd className="break-all font-mono text-gray-900 dark:text-gray-100">{__APP_BUILD_TIME__}</dd>
+              </dl>
+            </DialogContent>
+          </Dialog>
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">STORMDANCE</p>
             <h1 className="text-lg font-bold leading-tight text-gray-900 dark:text-gray-50">storm.dance</h1>

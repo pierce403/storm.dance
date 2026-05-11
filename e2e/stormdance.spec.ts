@@ -232,4 +232,19 @@ test.describe('storm.dance UX smoke checks', () => {
     await expect(hotkeys).toContainText('Ctrl+Alt+N');
     await expect(hotkeys).toContainText('Ctrl+Alt+1 / 2 / 3');
   });
+
+  test('shows app version and build metadata from the top bar', async ({ page }) => {
+    await openApp(page);
+
+    await page.getByRole('button', { name: 'Show app information' }).click();
+    const appInfo = page.getByRole('dialog', { name: 'Stormdance information' });
+
+    await expect(appInfo).toBeVisible();
+    await expect(appInfo).toContainText('Version');
+    await expect(appInfo).toContainText('0.0.0');
+    await expect(appInfo).toContainText('Build time');
+
+    const buildIso = (await appInfo.locator('dd').last().textContent()) || '';
+    expect(buildIso).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
 });
