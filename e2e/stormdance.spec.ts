@@ -240,6 +240,7 @@ test.describe('storm.dance UX smoke checks', () => {
     const appInfo = page.getByRole('dialog', { name: 'Stormdance information' });
 
     await expect(appInfo).toBeVisible();
+    await expect(appInfo).toContainText('local-first note-taking app');
     await expect(appInfo).toContainText('Version');
     await expect(appInfo).toContainText('0.0.0');
     await expect(appInfo).toContainText('Build time');

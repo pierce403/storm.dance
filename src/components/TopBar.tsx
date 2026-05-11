@@ -73,6 +73,10 @@ export function TopBar({
           <div className="h-9 w-9 rounded-2xl flex items-center justify-center">
             <img src="/logo.svg" alt="STORMDANCE Logo" className="h-full w-full" />
           </div>
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">STORMDANCE</p>
+            <h1 className="text-lg font-bold leading-tight text-gray-900 dark:text-gray-50">storm.dance</h1>
+          </div>
           <Dialog>
             <DialogTrigger asChild>
               <Button
@@ -88,7 +92,7 @@ export function TopBar({
               <DialogHeader>
                 <DialogTitle>Stormdance information</DialogTitle>
                 <DialogDescription>
-                  Version and build metadata for this running app.
+                  A local-first note-taking app for private notebooks, offline editing, encrypted backups, and optional XMTP collaboration.
                 </DialogDescription>
               </DialogHeader>
               <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-3 text-sm">
@@ -103,10 +107,6 @@ export function TopBar({
               </dl>
             </DialogContent>
           </Dialog>
-          <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">STORMDANCE</p>
-            <h1 className="text-lg font-bold leading-tight text-gray-900 dark:text-gray-50">storm.dance</h1>
-          </div>
         </div>
 
         {/* Right side: Status indicators and theme toggle */}
