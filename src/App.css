@@ -59,6 +59,11 @@ html, body, #root {
   list-style: disc;
 }
 
+.stormdance-markdown-preview ul:has(.stormdance-task-list-item) {
+  list-style: none;
+  padding-left: 0.25rem;
+}
+
 .stormdance-markdown-preview ol {
   list-style: decimal;
 }
@@ -95,6 +100,19 @@ html, body, #root {
   color: #0f766e;
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+.stormdance-task-list-item {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.stormdance-task-list-item input[type="checkbox"] {
+  accent-color: #eab308;
+  height: 1rem;
+  margin-top: 0.25rem;
+  width: 1rem;
 }
 
 .stormdance-markdown-editor {

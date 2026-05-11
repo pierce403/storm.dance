@@ -1,6 +1,6 @@
 import React, { useEffect, RefObject, useRef, useState } from 'react';
 import { Columns2, Eye, FileText, type LucideIcon } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import { Note } from '../../lib/db';
 
 interface EditorProps {
@@ -20,6 +20,9 @@ const EDITOR_MODES: Array<{ value: EditorMode; label: string; Icon: LucideIcon }
   { value: 'markdown', label: 'Markdown', Icon: Eye },
 ];
 
+const TASK_ITEM_PREFIX_PATTERN = /^\s*\[([ xX])\]\s+(.*)$/;
+const TASK_MARKDOWN_LINE_PATTERN = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([ xX])(\]\s+.*)$/;
+
 function getInitialEditorMode(): EditorMode {
   if (typeof window === 'undefined') return 'text';
 
@@ -29,6 +32,33 @@ function getInitialEditorMode(): EditorMode {
   }
 
   return 'text';
+}
+
+function getTextFromReactNode(node: React.ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(getTextFromReactNode).join('');
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) {
+    return getTextFromReactNode(node.props.children);
+  }
+
+  return '';
+}
+
+function toggleTaskInMarkdown(markdown: string, taskIndex: number, checked: boolean): string {
+  let currentTaskIndex = -1;
+
+  return markdown
+    .split('\n')
+    .map((line) => {
+      const match = TASK_MARKDOWN_LINE_PATTERN.exec(line);
+      if (!match) return line;
+
+      currentTaskIndex += 1;
+      if (currentTaskIndex !== taskIndex) return line;
+
+      return `${match[1]}${checked ? 'x' : ' '}${match[3]}`;
+    })
+    .join('\n');
 }
 
 function serializeInlineNode(node: ChildNode): string {
@@ -79,13 +109,16 @@ function serializeList(element: HTMLElement, depth = 0): string {
         const tagName = child.tagName.toLowerCase();
         return tagName === 'ul' || tagName === 'ol';
       });
+      const taskCheckbox = clone.querySelector<HTMLInputElement>('input[data-markdown-task="true"]');
 
       nestedLists.forEach(list => list.remove());
+      taskCheckbox?.remove();
       const marker = ordered ? `${index + 1}.` : '-';
+      const taskMarker = taskCheckbox ? `[${taskCheckbox.checked ? 'x' : ' '}] ` : '';
       const itemMarkdown = serializeInlineChildren(clone).replace(/\n+/g, ' ').trim() || ' ';
       const nestedMarkdown = nestedLists.map(list => serializeList(list, depth + 1)).filter(Boolean).join('\n');
 
-      return [`${indent}${marker} ${itemMarkdown}`, nestedMarkdown].filter(Boolean).join('\n');
+      return [`${indent}${marker} ${taskMarker}${itemMarkdown}`, nestedMarkdown].filter(Boolean).join('\n');
     })
     .join('\n');
 }
@@ -131,6 +164,49 @@ interface RichMarkdownEditorProps {
   onMarkdownCommit: (markdown: string) => void;
 }
 
+interface MarkdownContentProps {
+  markdown: string;
+  onTaskToggle?: (taskIndex: number, checked: boolean) => void;
+}
+
+function MarkdownContent({ markdown, onTaskToggle }: MarkdownContentProps) {
+  const taskIndexRef = useRef(0);
+  taskIndexRef.current = 0;
+
+  const components: Components = {
+    li({ children, ...props }) {
+      const text = getTextFromReactNode(children).trim();
+      const taskMatch = TASK_ITEM_PREFIX_PATTERN.exec(text);
+
+      if (!taskMatch) {
+        return <li {...props}>{children}</li>;
+      }
+
+      const taskIndex = taskIndexRef.current;
+      taskIndexRef.current += 1;
+      const checked = taskMatch[1].toLowerCase() === 'x';
+      const label = taskMatch[2].trim();
+
+      return (
+        <li {...props} className="stormdance-task-list-item">
+          <input
+            key={`${taskIndex}-${checked ? 'checked' : 'unchecked'}`}
+            type="checkbox"
+            defaultChecked={checked}
+            aria-label={`Toggle task ${label || taskIndex + 1}`}
+            data-markdown-task="true"
+            contentEditable={false}
+            onChange={(event) => onTaskToggle?.(taskIndex, event.currentTarget.checked)}
+          />
+          <span>{label}</span>
+        </li>
+      );
+    },
+  };
+
+  return <ReactMarkdown components={components}>{markdown}</ReactMarkdown>;
+}
+
 const RichMarkdownEditor = React.memo(function RichMarkdownEditor({ markdown, onMarkdownInput, onMarkdownCommit }: RichMarkdownEditorProps) {
   const editorRef = useRef<HTMLElement>(null);
   const [renderedMarkdown, setRenderedMarkdown] = useState(markdown);
@@ -164,6 +240,14 @@ const RichMarkdownEditor = React.memo(function RichMarkdownEditor({ markdown, on
     lastSyncedMarkdownRef.current = nextMarkdown;
     latestMarkdownRef.current = nextMarkdown;
     setRenderedMarkdown(nextMarkdown);
+  };
+
+  const handleTaskToggle = (taskIndex: number, checked: boolean) => {
+    const nextMarkdown = toggleTaskInMarkdown(latestMarkdownRef.current || markdown, taskIndex, checked);
+    lastSyncedMarkdownRef.current = nextMarkdown;
+    latestMarkdownRef.current = nextMarkdown;
+    setRenderedMarkdown(nextMarkdown);
+    onMarkdownInput(nextMarkdown);
     onMarkdownCommit(nextMarkdown);
   };
 
@@ -186,7 +270,7 @@ const RichMarkdownEditor = React.memo(function RichMarkdownEditor({ markdown, on
       onInput={handleInput}
       onBlur={handleBlur}
     >
-      {markdownForRender.trim() ? <ReactMarkdown>{markdownForRender}</ReactMarkdown> : null}
+      {markdownForRender.trim() ? <MarkdownContent markdown={markdownForRender} onTaskToggle={handleTaskToggle} /> : null}
     </article>
   );
 }, (previousProps, nextProps) => {
@@ -303,15 +387,15 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
       richSaveTimerRef.current = null;
     }
     persistContent(markdownToCommit);
-    lastRichInputMarkdownRef.current = null;
   };
 
   const handleContentInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
+    lastRichInputMarkdownRef.current = null;
     updateContent(e.currentTarget.value);
   };
 
   const handleEditorModeChange = (nextMode: EditorMode) => {
-    if (editorMode === 'markdown' && nextMode !== 'markdown') {
+    if ((editorMode === 'markdown' || editorMode === 'split') && nextMode !== editorMode) {
       handleRichMarkdownCommit(contentRef.current);
       setContent(contentRef.current);
     }
@@ -328,8 +412,7 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
   }
 
   const showTextEditor = editorMode === 'text' || editorMode === 'split';
-  const showMarkdownPreview = editorMode === 'split';
-  const showRichMarkdownEditor = editorMode === 'markdown';
+  const showRichMarkdownEditor = editorMode === 'split' || editorMode === 'markdown';
   const editorBodyLayout = editorMode === 'split' ? 'flex flex-col md:flex-row' : 'flex flex-col';
   const editorPaneClass =
     editorMode === 'split'
@@ -401,20 +484,6 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
               onMarkdownInput={handleRichMarkdownInput}
               onMarkdownCommit={handleRichMarkdownCommit}
             />
-          )}
-
-          {showMarkdownPreview && (
-            <article
-              className="stormdance-markdown-preview min-h-0 min-w-0 flex-1 overflow-auto p-4 text-left text-sm leading-6 text-gray-800 dark:text-gray-100"
-              role="region"
-              aria-label="Rendered markdown preview"
-            >
-              {content.trim() ? (
-                <ReactMarkdown>{content}</ReactMarkdown>
-              ) : (
-                <p className="italic text-gray-400 dark:text-gray-500">Markdown preview will appear here.</p>
-              )}
-            </article>
           )}
         </div>
       </div>

@@ -192,28 +192,35 @@ test.describe('storm.dance notes', () => {
     await expect(splitMode).toHaveAttribute('aria-checked', 'true');
     await expect(content).toBeVisible();
 
-    const preview = page.getByRole('region', { name: 'Rendered markdown preview' });
-    await expect(preview.getByRole('heading', { name: 'Markdown Heading' })).toBeVisible();
-    await expect(preview.getByRole('listitem').filter({ hasText: 'one' })).toBeVisible();
-    await expect(preview.getByText('Bold line')).toBeVisible();
+    const splitRichEditor = page.getByRole('textbox', { name: 'Editable rendered markdown' });
+    await expect(splitRichEditor.locator('h1')).toHaveText('Markdown Heading');
+    await expect(splitRichEditor.locator('li').filter({ hasText: 'one' })).toBeVisible();
+    await expect(splitRichEditor.getByText('Bold line')).toBeVisible();
 
     await content.fill(`${markdown}\n\nFresh preview text`);
-    await expect(preview).toContainText('Fresh preview text');
+    await expect(splitRichEditor).toContainText('Fresh preview text');
+
+    await splitRichEditor.locator('h1').click();
+    await page.keyboard.press('End');
+    await page.keyboard.type(' Split');
+    await expect(splitRichEditor.locator('h1')).toHaveText('Markdown Heading Split');
+    const splitEditedMarkdown = '# Markdown Heading Split\n\n- one\n- two\n\n**Bold line**\n\nFresh preview text';
+    await expect(content).toHaveValue(splitEditedMarkdown);
 
     await markdownMode.click();
     await expect(markdownMode).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByPlaceholder('Start writing your note...')).toHaveCount(0);
 
     const richEditor = page.getByRole('textbox', { name: 'Editable rendered markdown' });
-    await expect(richEditor.locator('h1')).toHaveText('Markdown Heading');
+    await expect(richEditor.locator('h1')).toHaveText('Markdown Heading Split');
     await expect(richEditor.locator('li').filter({ hasText: 'one' })).toBeVisible();
     await expect(richEditor.getByText('Bold line')).toBeVisible();
 
     await richEditor.locator('h1').click();
     await page.keyboard.press('End');
     await page.keyboard.type(' Edited');
-    await expect(richEditor.locator('h1')).toHaveText('Markdown Heading Edited');
-    const richEditedMarkdown = '# Markdown Heading Edited\n\n- one\n- two\n\n**Bold line**\n\nFresh preview text';
+    await expect(richEditor.locator('h1')).toHaveText('Markdown Heading Split Edited');
+    const richEditedMarkdown = '# Markdown Heading Split Edited\n\n- one\n- two\n\n**Bold line**\n\nFresh preview text';
     const activeMarkdownNoteId = await page.evaluate(() => {
       const api = (window as Window & {
         stormdance?: { getWorkspaceState: () => { activeNoteId: string | null } };
@@ -236,10 +243,53 @@ test.describe('storm.dance notes', () => {
     await page.reload();
     await expect(page.getByRole('heading', { name: 'storm.dance' })).toBeVisible();
     await expect(page.getByRole('radio', { name: 'Markdown editor mode' })).toHaveAttribute('aria-checked', 'true');
-    await expect(page.getByRole('textbox', { name: 'Editable rendered markdown' }).locator('h1')).toHaveText('Markdown Heading Edited');
+    await expect(page.getByRole('textbox', { name: 'Editable rendered markdown' }).locator('h1')).toHaveText('Markdown Heading Split Edited');
 
     await page.getByRole('radio', { name: 'Text editor mode' }).click();
     await expect(page.getByPlaceholder('Start writing your note...')).toHaveValue(richEditedMarkdown);
+  });
+
+  test('renders task list checkboxes and syncs toggles to markdown', async ({ page }) => {
+    await openApp(page);
+
+    await page.getByRole('button', { name: 'Create new note', exact: true }).click();
+    await page.getByPlaceholder('Note Title').fill('Task List E2E');
+
+    const content = page.getByPlaceholder('Start writing your note...');
+    await content.fill('- [ ] Write tests\n- [x] Ship fix');
+
+    await page.getByRole('radio', { name: 'Split editor mode' }).click();
+    const richEditor = page.getByRole('textbox', { name: 'Editable rendered markdown' });
+    const writeTests = richEditor.getByRole('checkbox', { name: 'Toggle task Write tests' });
+    const shipFix = richEditor.getByRole('checkbox', { name: 'Toggle task Ship fix' });
+
+    await expect(writeTests).toBeVisible();
+    await expect(writeTests).not.toBeChecked();
+    await expect(shipFix).toBeChecked();
+
+    await writeTests.check();
+    await expect(content).toHaveValue('- [x] Write tests\n- [x] Ship fix');
+
+    await shipFix.uncheck();
+    const toggledTasks = '- [x] Write tests\n- [ ] Ship fix';
+    await expect(content).toHaveValue(toggledTasks);
+
+    const activeTaskNoteId = await page.evaluate(() => {
+      const api = (window as Window & {
+        stormdance?: { getWorkspaceState: () => { activeNoteId: string | null } };
+      }).stormdance;
+      return api?.getWorkspaceState().activeNoteId ?? null;
+    });
+    expect(activeTaskNoteId).not.toBeNull();
+    await expectStoredNoteById(page, activeTaskNoteId!, toggledTasks);
+    await page.getByLabel('Note title').click();
+    await expectStoredNoteById(page, activeTaskNoteId!, toggledTasks);
+
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'storm.dance' })).toBeVisible();
+    await expect(page.getByRole('radio', { name: 'Split editor mode' })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByRole('checkbox', { name: 'Toggle task Write tests' })).toBeChecked();
+    await expect(page.getByRole('checkbox', { name: 'Toggle task Ship fix' })).not.toBeChecked();
   });
 
   test('supports notebook and folder creation without breaking navigation', async ({ page }) => {
