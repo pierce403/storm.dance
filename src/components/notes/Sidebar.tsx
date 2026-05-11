@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, RefObject, forwardRef, useImperativeHandle } from 'react';
+import React, { useCallback, useState, useEffect, useRef, RefObject, forwardRef, useImperativeHandle } from 'react';
 import { Plus, Trash2, Book, Loader2, ChevronRight, ChevronDown, Folder as FolderIcon, Edit2, Info, Key, AlertCircle, Download, Users } from 'lucide-react';
 import { Note, Notebook, Folder, dbService } from '../../lib/db';
 import type { BrowserClient } from '@/lib/xmtp-browser-sdk';
@@ -194,7 +194,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     }
   };
 
-  const toggleFolder = (folderId: string) => {
+  const toggleFolder = useCallback((folderId: string) => {
     setExpandedFolders(prev => {
       const newSet = new Set(prev);
       if (newSet.has(folderId)) {
@@ -204,15 +204,15 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
       }
       return newSet;
     });
-  };
+  }, []);
 
   // --- Helper functions for folder/note retrieval ---
-  const getRootFolders = () => folders.filter(f => f.parentFolderId === null && f.notebookId === selectedNotebookId).sort((a, b) => a.name.localeCompare(b.name));
-  const getChildFolders = (parentId: string) => folders.filter(f => f.parentFolderId === parentId).sort((a, b) => a.name.localeCompare(b.name));
-  const getNotesInFolder = (folderId: string | null) => notes.filter(n => n.folderId === folderId && n.notebookId === selectedNotebookId).sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+  const getRootFolders = useCallback(() => folders.filter(f => f.parentFolderId === null && f.notebookId === selectedNotebookId).sort((a, b) => a.name.localeCompare(b.name)), [folders, selectedNotebookId]);
+  const getChildFolders = useCallback((parentId: string) => folders.filter(f => f.parentFolderId === parentId).sort((a, b) => a.name.localeCompare(b.name)), [folders]);
+  const getNotesInFolder = useCallback((folderId: string | null) => notes.filter(n => n.folderId === folderId && n.notebookId === selectedNotebookId).sort((a, b) => (a.title || '').localeCompare(b.title || '')), [notes, selectedNotebookId]);
 
   // --- Helper function to get flattened list of visible items (defined outside useImperativeHandle) ---
-  const getOrderedElements = (): HTMLElement[] => {
+  const getOrderedElements = useCallback((): HTMLElement[] => {
     const orderedElements: HTMLElement[] = [];
     const rootFolders = getRootFolders();
     const rootNotes = getNotesInFolder(null);
@@ -239,7 +239,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     });
 
     return orderedElements;
-  };
+  }, [expandedFolders, getChildFolders, getNotesInFolder, getRootFolders]);
 
   // --- Keyboard Navigation Logic ---
   useEffect(() => {
@@ -377,6 +377,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     notes, // Needed to find folderId of focused note
     folders,
     expandedFolders,
+    getOrderedElements,
     selectedNotebookId,
     isCreatingFolder,
     renamingFolderId,
@@ -600,7 +601,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
           onDragEnd={handleDragEnd} // Add drag end handler
         >
           <button
-            className={`w-full text-left px-3 py-1 my-px rounded-sm text-sm draggable-note focus:outline-none focus:ring-1 focus:ring-yellow-400 focus:bg-yellow-100 dark:focus:bg-yellow-900/30 ${selectedNoteId === note.id ? 'bg-yellow-100 dark:bg-yellow-900/30 font-medium text-yellow-900 dark:text-yellow-100' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+            className={`w-full text-left px-3 py-1 my-px rounded-sm text-sm draggable-note focus:outline-none focus:ring-1 focus:ring-yellow-400 focus:bg-yellow-100 dark:focus:bg-yellow-900/30 ${selectedNoteId === note.id ? 'bg-yellow-950/80 dark:bg-yellow-900/30 font-medium text-yellow-300 dark:text-yellow-100' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
             onClick={() => onSelectNote(note)}
             data-note-id={note.id}
             id={`note-${note.id}`}
@@ -610,7 +611,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
             aria-label={`Note ${note.title || 'Untitled'}`}
             aria-selected={selectedNoteId === note.id}
           >
-            <span className="block truncate select-none">{note.title || 'Untitled'}</span>
+            <span className={`block truncate select-none ${selectedNoteId === note.id ? 'text-yellow-300 dark:text-yellow-100' : ''}`}>{note.title || 'Untitled'}</span>
           </button>
           <button
             className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-sm opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-red-100 dark:hover:bg-gray-700 text-red-600 focus:outline-none focus:ring-1 focus:ring-red-400"

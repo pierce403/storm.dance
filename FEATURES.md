@@ -91,7 +91,7 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - A top-bar control switches between light and dark themes and persists the preference to local storage.
   - The initial theme uses stored preference first, then system preference.
   - IPFS and XMTP status indicators remain visible in the top bar.
-  - A top-left app information control shows the running version, build timestamp, and local-first note-taking app description.
+  - A top-left app information control shows the running version, build timestamp, linked GitHub commit, and local-first note-taking app description.
   - A live workspace status summarizes the selected notebook, selected note, content counts, editor state, and connection state for assistive tools and LLM-driven browsers.
   - Browser-safe Obsidian-style hotkeys are available from the top bar and use Ctrl+Alt on Windows/Linux or Cmd+Option on macOS.
   - Blocked IndexedDB upgrades show a recovery screen with guidance and storage-clear action.
@@ -99,7 +99,7 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - [x] Playwright checks desktop and mobile shell screenshots.
   - [x] Playwright checks for horizontal overflow at desktop and mobile widths.
   - [x] Playwright verifies the light-to-dark theme toggle state change.
-  - [x] Playwright verifies the app information dialog exposes version and build metadata.
+  - [x] Playwright verifies the app information dialog exposes version, build metadata, and the linked commit.
   - [x] Playwright verifies workspace status, selected ARIA state, and hotkey help visibility.
 
 ### XMTP Identity and Connection Management

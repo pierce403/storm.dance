@@ -21,6 +21,7 @@ When working on this project, update this file whenever you learn something dura
 
 ## Workflow
 - **Always** commit and push changes after every update or significant step.
+- Before each push with app changes, bump `package.json` and `package-lock.json` version so the app info dialog reflects the new release.
 - Start by checking `git status --short --branch`.
 - Read this file and `FEATURES.md` before significant implementation work.
 - Keep unrelated changes separate; do not revert user changes unless explicitly asked.
@@ -79,6 +80,7 @@ When working on this project, update this file whenever you learn something dura
 - Uses `lucide-react` for icons.
 - `FEATURES.md` replaced the old `TECHNOLOGY.md`; put feature specs and technology constraints there.
 - `vite.config.ts` defines `__APP_VERSION__` from `package.json` and `__APP_BUILD_TIME__` from the current build timestamp for the top-bar app info dialog.
+- `vite.config.ts` also defines `__APP_COMMIT_SHA__` and `__APP_COMMIT_URL__`, using GitHub Actions environment values when available and local git metadata otherwise.
 
 ## Known Issues & Solutions
 - `npm install` may fail in sandboxed environments with `EAI_AGAIN`; rerun with network approval when dependency downloads are required.

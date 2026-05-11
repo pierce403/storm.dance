@@ -444,10 +444,15 @@ test.describe('storm.dance UX smoke checks', () => {
     await expect(appInfo).toBeVisible();
     await expect(appInfo).toContainText('local-first note-taking app');
     await expect(appInfo).toContainText('Version');
-    await expect(appInfo).toContainText('0.0.0');
+    await expect(appInfo).toContainText('0.0.1');
     await expect(appInfo).toContainText('Build time');
+    await expect(appInfo).toContainText('Commit');
+    await expect(appInfo.getByRole('link', { name: /^[0-9a-f]{7}$/ })).toHaveAttribute(
+      'href',
+      /^https:\/\/github\.com\/pierce403\/storm\.dance\/commit\/[0-9a-f]{40}$/,
+    );
 
-    const buildIso = (await appInfo.locator('dd').last().textContent()) || '';
+    const buildIso = (await appInfo.locator('dd').nth(2).textContent()) || '';
     expect(buildIso).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   });
 });

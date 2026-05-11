@@ -61,6 +61,9 @@ export function TopBar({
       minute: '2-digit',
       timeZoneName: 'short',
     });
+  const shortCommitSha = __APP_COMMIT_SHA__ === 'unknown'
+    ? __APP_COMMIT_SHA__
+    : __APP_COMMIT_SHA__.slice(0, 7);
 
   return (
     <header
@@ -104,6 +107,21 @@ export function TopBar({
                 </dd>
                 <dt className="font-medium text-gray-600 dark:text-gray-300">Build ISO</dt>
                 <dd className="break-all font-mono text-gray-900 dark:text-gray-100">{__APP_BUILD_TIME__}</dd>
+                <dt className="font-medium text-gray-600 dark:text-gray-300">Commit</dt>
+                <dd className="break-all font-mono text-gray-900 dark:text-gray-100">
+                  {__APP_COMMIT_URL__ ? (
+                    <a
+                      href={__APP_COMMIT_URL__}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-teal-700 underline underline-offset-4 hover:text-teal-900 dark:text-teal-300 dark:hover:text-teal-100"
+                    >
+                      {shortCommitSha}
+                    </a>
+                  ) : (
+                    shortCommitSha
+                  )}
+                </dd>
               </dl>
             </DialogContent>
           </Dialog>
