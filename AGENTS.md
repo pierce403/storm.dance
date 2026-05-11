@@ -85,4 +85,5 @@ When working on this project, update this file whenever you learn something dura
 - The app performs IPFS reachability checks on load. Tests should mock those requests unless the test is specifically about live IPFS connectivity.
 - Browser automation can edit note fields without emitting React `onChange`; note saves should use `input` events as the canonical trigger, and direct automation can use `window.stormdance.setNoteContent(noteId, content)` or related helpers.
 - Rapid title/content edits can race through IndexedDB if saves are allowed to overlap. Preserve the per-note update queue and local merge behavior in `App.tsx` when changing note persistence.
+- Markdown mode uses a lightweight `contenteditable` rendered document plus DOM-to-Markdown serialization for common structures. Avoid assuming it has the full fidelity of a ProseMirror/TipTap/MDXEditor-style editor unless one of those engines is introduced deliberately.
 - `npm run lint` currently reports pre-existing app-wide lint debt. Run targeted ESLint on files you touch, and keep broad cleanup separate from feature work.

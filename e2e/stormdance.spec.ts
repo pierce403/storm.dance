@@ -60,6 +60,31 @@ async function expectStoredNote(page: Page, title: string, content: string) {
   );
 }
 
+async function expectStoredNoteById(page: Page, noteId: string, content: string) {
+  await page.waitForFunction(
+    ({ expectedNoteId, expectedContent }) =>
+      new Promise<boolean>((resolve) => {
+        const request = indexedDB.open('storm.dance');
+        request.onerror = () => resolve(false);
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction('notes', 'readonly');
+          const getNote = tx.objectStore('notes').get(expectedNoteId);
+          getNote.onerror = () => {
+            db.close();
+            resolve(false);
+          };
+          getNote.onsuccess = () => {
+            const note = getNote.result as { content?: string } | undefined;
+            db.close();
+            resolve(note?.content === expectedContent);
+          };
+        };
+      }),
+    { expectedNoteId: noteId, expectedContent: content },
+  );
+}
+
 async function expectTextareaReachesPageBottom(page: Page) {
   const bottomGap = await page.getByPlaceholder('Start writing your note...').evaluate((textarea) => {
     const rect = textarea.getBoundingClientRect();
@@ -177,22 +202,44 @@ test.describe('storm.dance notes', () => {
 
     await markdownMode.click();
     await expect(markdownMode).toHaveAttribute('aria-checked', 'true');
-    await expect(content).toBeVisible();
-    await expect(preview.getByRole('heading', { name: 'Markdown Heading' })).toBeVisible();
+    await expect(page.getByPlaceholder('Start writing your note...')).toHaveCount(0);
 
-    const editedInMarkdownMode = '## Live edit\n\nUpdated while markdown mode is active.';
-    await content.fill(editedInMarkdownMode);
-    await expect(preview.getByRole('heading', { name: 'Live edit' })).toBeVisible();
-    await expect(preview).toContainText('Updated while markdown mode is active.');
+    const richEditor = page.getByRole('textbox', { name: 'Editable rendered markdown' });
+    await expect(richEditor.locator('h1')).toHaveText('Markdown Heading');
+    await expect(richEditor.locator('li').filter({ hasText: 'one' })).toBeVisible();
+    await expect(richEditor.getByText('Bold line')).toBeVisible();
+
+    await richEditor.locator('h1').click();
+    await page.keyboard.press('End');
+    await page.keyboard.type(' Edited');
+    await expect(richEditor.locator('h1')).toHaveText('Markdown Heading Edited');
+    const richEditedMarkdown = '# Markdown Heading Edited\n\n- one\n- two\n\n**Bold line**\n\nFresh preview text';
+    const activeMarkdownNoteId = await page.evaluate(() => {
+      const api = (window as Window & {
+        stormdance?: { getWorkspaceState: () => { activeNoteId: string | null } };
+      }).stormdance;
+      return api?.getWorkspaceState().activeNoteId ?? null;
+    });
+    expect(activeMarkdownNoteId).not.toBeNull();
+    await page.waitForFunction((expectedContent) => {
+      const api = (window as Window & {
+        stormdance?: {
+          getNote: (noteId: string) => { content?: string } | null;
+          getWorkspaceState: () => { activeNoteId: string | null };
+        };
+      }).stormdance;
+      const activeNoteId = api?.getWorkspaceState().activeNoteId;
+      return !!activeNoteId && api?.getNote(activeNoteId)?.content === expectedContent;
+    }, richEditedMarkdown);
+    await expectStoredNoteById(page, activeMarkdownNoteId!, richEditedMarkdown);
 
     await page.reload();
     await expect(page.getByRole('heading', { name: 'storm.dance' })).toBeVisible();
     await expect(page.getByRole('radio', { name: 'Markdown editor mode' })).toHaveAttribute('aria-checked', 'true');
-    await expect(page.getByPlaceholder('Start writing your note...')).toHaveValue(editedInMarkdownMode);
-    await expect(page.getByRole('region', { name: 'Rendered markdown preview' })).toContainText('Updated while markdown mode is active.');
+    await expect(page.getByRole('textbox', { name: 'Editable rendered markdown' }).locator('h1')).toHaveText('Markdown Heading Edited');
 
     await page.getByRole('radio', { name: 'Text editor mode' }).click();
-    await expect(page.getByPlaceholder('Start writing your note...')).toHaveValue(editedInMarkdownMode);
+    await expect(page.getByPlaceholder('Start writing your note...')).toHaveValue(richEditedMarkdown);
   });
 
   test('supports notebook and folder creation without breaking navigation', async ({ page }) => {

@@ -97,6 +97,22 @@ html, body, #root {
   text-underline-offset: 3px;
 }
 
+.stormdance-markdown-editor {
+  cursor: text;
+}
+
+.stormdance-markdown-editor:focus {
+  box-shadow: inset 0 0 0 2px rgba(234, 179, 8, 0.45);
+  outline: none;
+}
+
+.stormdance-markdown-editor[data-empty="true"]::before {
+  color: #9ca3af;
+  content: "Start writing your note...";
+  font-style: italic;
+  pointer-events: none;
+}
+
 .dark .stormdance-markdown-preview blockquote {
   color: #cbd5e1;
 }
