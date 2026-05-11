@@ -21,15 +21,15 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
     }
   }, [note, titleInputRef, textAreaRef]);
 
-  const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleTitleInput = (e: React.FormEvent<HTMLInputElement>) => {
     if (note) {
-      onUpdateNote(note.id, { title: e.target.value });
+      onUpdateNote(note.id, { title: e.currentTarget.value });
     }
   };
 
-  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const handleContentInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
     if (note) {
-      onUpdateNote(note.id, { content: e.target.value });
+      onUpdateNote(note.id, { content: e.currentTarget.value });
     }
   };
 
@@ -46,16 +46,16 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
       <input
         ref={titleInputRef}
         type="text"
-        value={note.title || ''}
-        onChange={handleTitleChange}
+        defaultValue={note.title || ''}
+        onInput={handleTitleInput}
         placeholder="Note Title"
         aria-label="Note title"
         className="text-2xl font-bold mb-4 p-2 border-b bg-transparent border-gray-300 dark:border-gray-700 focus:outline-none focus:border-yellow-400 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
       />
       <textarea
         ref={textAreaRef}
-        value={note.content || ''}
-        onChange={handleContentChange}
+        defaultValue={note.content || ''}
+        onInput={handleContentInput}
         placeholder="Start writing your note..."
         aria-label="Note content"
         className="min-h-0 flex-1 w-full resize-none bg-transparent p-2 focus:outline-none dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"

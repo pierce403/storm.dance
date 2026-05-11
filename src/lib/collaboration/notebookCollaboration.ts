@@ -1,6 +1,6 @@
 import type { Conversation, DecodedMessage, Identifier } from '@xmtp/browser-sdk';
-import { buildNotebookTopic } from '../xmtp-browser-sdk';
 import { NotebookCrdtClock, buildUpdatePayload } from './crdt';
+import { buildNotebookTopic } from './topic';
 import { CollaborationContact, CrdtUpdatePayload, InvitePayload, CollaborationMessage } from './types';
 
 export interface NoteShape {
@@ -12,8 +12,22 @@ export interface NoteShape {
 }
 
 interface ConversationFactory {
-  newDmWithIdentifier: (identifier: Identifier, options?: any) => Promise<Conversation>;
+  newDmWithIdentifier: (identifier: Identifier, options?: unknown) => Promise<Conversation>;
 }
+
+interface ConversationDebugInfo {
+  topic?: string;
+}
+
+interface CallbackStreamConversation {
+  stream: (
+    onMessage: (error: Error | null, message: DecodedMessage | undefined) => void,
+    onError: () => void,
+  ) => Promise<void> | void;
+}
+
+const getConversationTopic = (conversation: Conversation) =>
+  (conversation as Conversation & ConversationDebugInfo).topic || 'unknown';
 
 export interface XmtpClientLike {
   inboxId: string | undefined;
@@ -65,7 +79,7 @@ export class NotebookCollaborationSession {
         const inviteMsg: CollaborationMessage = { type: 'invite', payload: invitePayload };
         const serializedInvite = JSON.stringify(inviteMsg);
         if (this.debugLoggingEnabled) {
-          console.log(`[XMTP Outgoing] Conversation: ${(conversation as any).topic}`, serializedInvite);
+          console.log(`[XMTP Outgoing] Conversation: ${getConversationTopic(conversation)}`, serializedInvite);
         }
         await conversation.send(serializedInvite);
 
@@ -99,7 +113,7 @@ export class NotebookCollaborationSession {
     const serialized = JSON.stringify({ type: 'crdt-update', payload });
     await Promise.all(Array.from(this.conversations.values()).map((conversation) => {
       if (this.debugLoggingEnabled) {
-        console.log(`[XMTP Outgoing] Conversation: ${(conversation as any).topic}`, serialized);
+        console.log(`[XMTP Outgoing] Conversation: ${getConversationTopic(conversation)}`, serialized);
       }
       return conversation.send(serialized);
     }));
@@ -128,8 +142,8 @@ export class NotebookCollaborationSession {
   private async startStream(conversation: Conversation, token: number) {
     const selfInboxId = this.client.inboxId;
 
-    // Cast conversation to any to avoid type mismatch if Conversation type is from wasm-bindings
-    await (conversation as any).stream((error: Error | null, message: DecodedMessage | undefined) => {
+    const streamableConversation = conversation as unknown as CallbackStreamConversation;
+    await streamableConversation.stream((error: Error | null, message: DecodedMessage | undefined) => {
       if (this.streamAbort || token !== this.sessionToken) {
         return;
       }
@@ -139,7 +153,7 @@ export class NotebookCollaborationSession {
 
       if (this.debugLoggingEnabled) {
         const raw = typeof message.content === 'string' ? message.content : String(message.content);
-        console.log(`[XMTP Incoming] Conversation: ${(conversation as any).topic}`, raw);
+        console.log(`[XMTP Incoming] Conversation: ${getConversationTopic(conversation)}`, raw);
       }
 
       this.processMessage(message);

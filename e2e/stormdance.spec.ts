@@ -103,6 +103,36 @@ test.describe('storm.dance notes', () => {
     await expectTextareaReachesPageBottom(page);
     await expectStoredNote(page, 'E2E Note', 'Line one\nLine two');
 
+    const inputEventContent = 'Saved by a raw input event';
+    await content.evaluate((textarea, nextContent) => {
+      textarea.value = nextContent;
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    }, inputEventContent);
+    await expect(content).toHaveValue(inputEventContent);
+    await expectStoredNote(page, 'E2E Note', inputEventContent);
+
+    const noteId = await page.evaluate(() => {
+      const api = (window as Window & {
+        stormdance?: { getWorkspaceState: () => { activeNoteId: string | null } };
+      }).stormdance;
+      return api?.getWorkspaceState().activeNoteId ?? null;
+    });
+    expect(noteId).not.toBeNull();
+
+    const programmaticContent = 'Saved by window.stormdance.setNoteContent';
+    await page.evaluate(
+      async ({ targetNoteId, nextContent }) => {
+        const api = (window as Window & {
+          stormdance?: { setNoteContent: (noteId: string, content: string) => Promise<unknown> };
+        }).stormdance;
+        if (!api) throw new Error('window.stormdance API is not available');
+        await api.setNoteContent(targetNoteId, nextContent);
+      },
+      { targetNoteId: noteId!, nextContent: programmaticContent },
+    );
+    await expect(content).toHaveValue(programmaticContent);
+    await expectStoredNote(page, 'E2E Note', programmaticContent);
+
     await page.reload();
     await expect(page.getByRole('heading', { name: 'storm.dance' })).toBeVisible();
     await expect(noteButton).toBeVisible();
@@ -110,7 +140,7 @@ test.describe('storm.dance notes', () => {
     await expect(page.getByRole('tab', { name: 'Open note E2E Note' })).toHaveAttribute('aria-selected', 'true');
 
     await expect(title).toHaveValue('E2E Note');
-    await expect(content).toHaveValue('Line one\nLine two');
+    await expect(content).toHaveValue(programmaticContent);
 
     await noteButton.hover();
     await page.getByLabel('Delete note E2E Note').click();

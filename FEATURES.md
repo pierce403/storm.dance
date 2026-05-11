@@ -31,7 +31,8 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
 - **Description**: Users can create, open, edit, persist, and delete notes.
 - **Properties**:
   - New notes are created in the selected notebook/folder with the title `Untitled`.
-  - Title and content edits persist to IndexedDB.
+  - Title and content edits persist to IndexedDB from `input` events, including browser automation edits that do not emit `change`.
+  - `window.stormdance` exposes programmatic note helpers such as `setNoteContent(noteId, content)`, `setNoteTitle(noteId, title)`, `updateNote(noteId, updates)`, `openNote(noteId)`, and workspace state readers.
   - Reloading the app preserves saved notes.
   - Recently opened notes appear as tabs.
   - Selected notebook, open note tabs, and active note are restored from local storage after page refresh.
@@ -39,6 +40,7 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - Deleting a note removes it from the sidebar and any open editor tab.
 - **Test Criteria**:
   - [x] Playwright creates, edits, reloads, reopens, and deletes a note.
+  - [x] Playwright verifies raw `input` events and `window.stormdance.setNoteContent` persist note content.
   - [x] Playwright verifies the active note tab is restored after reload.
   - [x] Vitest covers collaboration-side note data behavior.
   - [ ] Markdown preview behavior is verified once preview controls are active.

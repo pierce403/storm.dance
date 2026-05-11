@@ -1,21 +1,10 @@
 import path from "path"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
-import { nodePolyfills } from 'vite-plugin-node-polyfills'
 
 export default defineConfig({
   plugins: [
     react(),
-    nodePolyfills({
-      // Focus specifically on what XMTP needs
-      include: ['buffer', 'process', 'stream', 'events', 'crypto', 'util'],
-      globals: {
-        Buffer: true,
-        global: true,
-        process: true,
-      },
-      protocolImports: true,
-    })
   ],
   define: {
     // Add buffer to global
@@ -26,10 +15,8 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
 
-      // Explicitly use browser-compatible versions
+      // Explicitly use the browser-compatible Buffer implementation.
       "buffer": "buffer",
-      "crypto": "crypto-browserify",
-      "stream": "stream-browserify",
     },
   },
   optimizeDeps: {
@@ -47,4 +34,3 @@ export default defineConfig({
     },
   },
 })
-

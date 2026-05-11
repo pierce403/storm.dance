@@ -1,12 +1,11 @@
 // Polyfills for XMTP and crypto dependencies
 import { Buffer } from 'buffer';
-import * as processModule from 'process';
 
 // Ensure process is globally available first
 if (typeof window !== 'undefined') {
   // Define process if it doesn't exist
   if (!window.process) {
-    window.process = processModule;
+    window.process = { env: {} } as typeof window.process;
   }
   
   // Ensure env exists on process
@@ -18,7 +17,7 @@ if (typeof window !== 'undefined') {
   window.Buffer = Buffer;
   
   // Define global for libraries that expect it
-  (window as any).global = window;
+  (window as unknown as { global: typeof globalThis }).global = globalThis;
   
   // Add additional crypto polyfills that XMTP might need
   if (typeof window.crypto === 'undefined') {
@@ -35,4 +34,4 @@ export default function setupPolyfills() {
   } else {
     console.error('Buffer implementation not properly initialized');
   }
-} 
+}

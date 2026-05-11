@@ -5,6 +5,7 @@ When working on this project, update this file whenever you learn something dura
 
 ## Responsibilities
 - Preserve local-first note editing as the reliable core workflow.
+- Fix Dependabot, npm audit, code scanning, and secret scanning findings whenever they are observed while working in the repo; do not treat them as optional follow-up unless a fix is blocked or unsafe.
 - Keep `FEATURES.md` current when shipped behavior, stability, or test criteria change.
 - Add or update tests when changing user-visible behavior.
 - Commit and push completed changes so the repository keeps history.
@@ -80,4 +81,5 @@ When working on this project, update this file whenever you learn something dura
 ## Known Issues & Solutions
 - `npm install` may fail in sandboxed environments with `EAI_AGAIN`; rerun with network approval when dependency downloads are required.
 - The app performs IPFS reachability checks on load. Tests should mock those requests unless the test is specifically about live IPFS connectivity.
+- Browser automation can edit note fields without emitting React `onChange`; note saves should use `input` events as the canonical trigger, and direct automation can use `window.stormdance.setNoteContent(noteId, content)` or related helpers.
 - `npm run lint` currently reports pre-existing app-wide lint debt. Run targeted ESLint on files you touch, and keep broad cleanup separate from feature work.

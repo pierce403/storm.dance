@@ -33,6 +33,35 @@ interface ExportedData {
   notes: ExportedNote[];
 }
 
+type ProgrammaticNoteUpdates = Partial<Pick<Note, 'title' | 'content' | 'folderId'>>;
+
+interface StormdanceWorkspaceState {
+  selectedNotebookId: string | null;
+  selectedNotebookName: string | null;
+  activeNoteId: string | null;
+  openNoteIds: string[];
+  notebookCount: number;
+  noteCount: number;
+  folderCount: number;
+}
+
+interface StormdanceProgrammaticApi {
+  getWorkspaceState: () => StormdanceWorkspaceState;
+  getNotes: () => Note[];
+  getNote: (noteId: string) => Note | null;
+  openNote: (noteId: string) => Note | null;
+  updateNote: (noteId: string, updates: ProgrammaticNoteUpdates) => Promise<Note | undefined>;
+  setNoteTitle: (noteId: string, title: string) => Promise<Note | undefined>;
+  setNoteContent: (noteId: string, content: string) => Promise<Note | undefined>;
+  createNote: (input?: ProgrammaticNoteUpdates) => Promise<Note | null>;
+}
+
+declare global {
+  interface Window {
+    stormdance?: StormdanceProgrammaticApi;
+  }
+}
+
 const WORKSPACE_STORAGE_KEYS = {
   selectedNotebookId: 'stormdance.workspace.selectedNotebookId',
   openNoteIds: 'stormdance.workspace.openNoteIds',
@@ -218,6 +247,9 @@ function App() {
   const selectedNotebookIdRef = useRef(selectedNotebookId);
   const openNoteIdsRef = useRef(openNoteIds);
   const activeNoteIdRef = useRef(activeNoteId);
+  const notebooksRef = useRef(notebooks);
+  const notesRef = useRef(notes);
+  const foldersRef = useRef(folders);
 
   const getNoteById = (id: string | null): Note | null => {
     if (!id) return null;
@@ -261,6 +293,18 @@ function App() {
     setActiveNoteId(nextActiveNoteId);
     storeNullableString(WORKSPACE_STORAGE_KEYS.activeNoteId, nextActiveNoteId);
   }, []);
+
+  useEffect(() => {
+    notebooksRef.current = notebooks;
+  }, [notebooks]);
+
+  useEffect(() => {
+    notesRef.current = notes;
+  }, [notes]);
+
+  useEffect(() => {
+    foldersRef.current = folders;
+  }, [folders]);
 
   useEffect(() => {
     selectedNotebookIdRef.current = selectedNotebookId;
@@ -438,10 +482,11 @@ function App() {
         const allNotebooks = await dbService.getAllNotebooks();
         setNotebooks(allNotebooks);
 
-        if (!selectedNotebookId) {
+        const initialSelectedNotebookId = selectedNotebookIdRef.current;
+        if (!initialSelectedNotebookId) {
           setSelectedNotebookIdAndStore(defaultNotebook.id);
         } else {
-          const selectedExists = allNotebooks.some(nb => nb.id === selectedNotebookId);
+          const selectedExists = allNotebooks.some(nb => nb.id === initialSelectedNotebookId);
           if (!selectedExists) {
             setSelectedNotebookIdAndStore(defaultNotebook.id);
           }
@@ -455,7 +500,7 @@ function App() {
       }
     };
     loadInitialData();
-  }, []);
+  }, [setSelectedNotebookIdAndStore, showToast]);
 
   useEffect(() => {
     const loadNotes = async () => {
@@ -505,13 +550,21 @@ function App() {
     loadNotes();
   }, [selectedNotebookId, setActiveNoteIdAndStore, setOpenNoteIdsAndStore, showToast]);
 
-  const handleSelectNote = (note: Note) => {
-    if (!note) return;
+  const openNoteById = useCallback((noteId: string): Note | null => {
+    const note = notesRef.current.find(candidate => candidate.id === noteId) || null;
+    if (!note) return null;
+
     if (!openNoteIdsRef.current.includes(note.id)) {
       setOpenNoteIdsAndStore([...openNoteIdsRef.current, note.id]);
     }
     setActiveNoteIdAndStore(note.id);
-  };
+    return { ...note };
+  }, [setActiveNoteIdAndStore, setOpenNoteIdsAndStore]);
+
+  const handleSelectNote = useCallback((note: Note) => {
+    if (!note) return;
+    openNoteById(note.id);
+  }, [openNoteById]);
 
   const handleCloseTab = (noteIdToClose: string) => {
     const currentOpenNoteIds = openNoteIdsRef.current;
@@ -524,19 +577,67 @@ function App() {
     }
   };
 
-  const handleUpdateNote = async (id: string, updates: Partial<Omit<Note, 'id' | 'createdAt' | 'updatedAt' | 'notebookId'>>) => {
+  const handleUpdateNote = useCallback(async (id: string, updates: ProgrammaticNoteUpdates): Promise<Note | undefined> => {
     try {
       const updatedNote = await dbService.updateNote(id, updates);
 
       if (updatedNote) {
-        setNotes(notes.map(note => note.id === id ? updatedNote : note));
+        setNotes(prevNotes => prevNotes.map(note => note.id === id ? updatedNote : note));
         await broadcastLocalUpdate(updatedNote);
       }
+      return updatedNote;
     } catch (error) {
       console.error('Failed to update note:', error);
       showToast('Error', 'Failed to update note', 'destructive');
+      return undefined;
     }
-  };
+  }, [broadcastLocalUpdate, showToast]);
+
+  const createProgrammaticNote = useCallback(async (input: ProgrammaticNoteUpdates = {}): Promise<Note | null> => {
+    const newNote = await handleCreateNote(input.folderId ?? null);
+    if (!newNote) return null;
+
+    const updates: ProgrammaticNoteUpdates = {};
+    if (input.title !== undefined) updates.title = input.title;
+    if (input.content !== undefined) updates.content = input.content;
+
+    if (Object.keys(updates).length === 0) {
+      return newNote;
+    }
+
+    return await handleUpdateNote(newNote.id, updates) || newNote;
+  }, [handleCreateNote, handleUpdateNote]);
+
+  useEffect(() => {
+    const api: StormdanceProgrammaticApi = {
+      getWorkspaceState: () => ({
+        selectedNotebookId: selectedNotebookIdRef.current,
+        selectedNotebookName: notebooksRef.current.find(notebook => notebook.id === selectedNotebookIdRef.current)?.name || null,
+        activeNoteId: activeNoteIdRef.current,
+        openNoteIds: [...openNoteIdsRef.current],
+        notebookCount: notebooksRef.current.length,
+        noteCount: notesRef.current.length,
+        folderCount: foldersRef.current.length,
+      }),
+      getNotes: () => notesRef.current.map(note => ({ ...note })),
+      getNote: (noteId: string) => {
+        const note = notesRef.current.find(candidate => candidate.id === noteId);
+        return note ? { ...note } : null;
+      },
+      openNote: openNoteById,
+      updateNote: handleUpdateNote,
+      setNoteTitle: (noteId: string, title: string) => handleUpdateNote(noteId, { title }),
+      setNoteContent: (noteId: string, content: string) => handleUpdateNote(noteId, { content }),
+      createNote: createProgrammaticNote,
+    };
+
+    window.stormdance = api;
+    return () => {
+      if (window.stormdance === api) {
+        delete window.stormdance;
+      }
+    };
+  }, [createProgrammaticNote, handleUpdateNote, openNoteById]);
 
   const handleDeleteNote = async (id: string) => {
     try {

@@ -1,5 +1,5 @@
-import { Client as XmtpClient, type ClientOptions } from '@xmtp/browser-sdk';
-import { Wallet, ethers } from 'ethers';
+import { Client as XmtpClient } from '@xmtp/browser-sdk';
+import { ethers } from 'ethers';
 import { IdentityUtils } from '@/utils/identity';
 
 export type BrowserClient = XmtpClient;
@@ -41,8 +41,4 @@ export async function createBrowserClient(
   });
 
   return { client, wallet };
-}
-
-export function buildNotebookTopic(notebookId: string) {
-  return `stormdance:notebook:${notebookId}`;
 }
