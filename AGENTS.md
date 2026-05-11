@@ -51,7 +51,8 @@ When working on this project, update this file whenever you learn something dura
     - If NOT using a custom domain (e.g., `user.github.io/repo`), update `base` in `vite.config.ts` to `'/repo-name/'`.
 - **Troubleshooting**:
     - Check the "Actions" tab in GitHub for workflow run status.
-    - Ensure `actions/upload-pages-artifact@v4` and `actions/deploy-pages@v4` are used.
+    - Keep workflow Actions on current non-deprecated major versions. As of 2026-05-11, that means `actions/checkout@v6`, `actions/setup-node@v6`, `actions/configure-pages@v6`, `actions/upload-pages-artifact@v5`, `actions/deploy-pages@v5`, and `actions/upload-artifact@v7`.
+    - Before changing workflow Action majors, verify current official releases with `gh release list --repo actions/<action-name> --limit 5`.
     - `tsc -b` cannot be used with `--skipLibCheck`.
 
 ## Playwright
