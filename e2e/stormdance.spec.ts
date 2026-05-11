@@ -292,6 +292,64 @@ test.describe('storm.dance notes', () => {
     await expect(page.getByRole('checkbox', { name: 'Toggle task Ship fix' })).not.toBeChecked();
   });
 
+  test('formats markdown from the rich text toolbar', async ({ page }) => {
+    await openApp(page);
+
+    await page.getByRole('button', { name: 'Create new note', exact: true }).click();
+    await page.getByPlaceholder('Note Title').fill('Toolbar E2E');
+
+    const content = page.getByPlaceholder('Start writing your note...');
+    await content.fill('Toolbar text');
+    await page.getByRole('radio', { name: 'Split editor mode' }).click();
+
+    const toolbar = page.getByRole('toolbar', { name: 'Markdown formatting toolbar' });
+    await expect(toolbar).toBeVisible();
+
+    await content.evaluate((textarea: HTMLTextAreaElement) => {
+      textarea.focus();
+      textarea.setSelectionRange(0, textarea.value.length);
+    });
+    await page.getByLabel('Markdown block style').selectOption('heading2');
+    await expect(content).toHaveValue('## Toolbar text');
+
+    await content.evaluate((textarea: HTMLTextAreaElement) => {
+      textarea.focus();
+      textarea.setSelectionRange(3, textarea.value.length);
+    });
+    await toolbar.getByRole('button', { name: 'Bold' }).click();
+    await expect(content).toHaveValue('## **Toolbar text**');
+
+    await content.evaluate((textarea: HTMLTextAreaElement) => {
+      textarea.focus();
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    });
+    await page.keyboard.press('Enter');
+    await toolbar.getByRole('button', { name: 'Task list' }).click();
+    await expect(content).toHaveValue('## **Toolbar text**\n- [ ] Task');
+    await expect(page.getByRole('checkbox', { name: 'Toggle task Task' })).toBeVisible();
+
+    await page.getByRole('radio', { name: 'Markdown editor mode' }).click();
+    const richEditor = page.getByRole('textbox', { name: 'Editable rendered markdown' });
+    await richEditor.click();
+
+    await toolbar.getByRole('button', { name: 'Insert link' }).click();
+    const linkForm = page.getByRole('form', { name: 'Insert link URL' });
+    await linkForm.getByRole('textbox', { name: 'Link URL' }).fill('https://example.com');
+    await linkForm.getByRole('button', { name: 'Insert' }).click();
+    await expect(richEditor.getByText('Link text')).toBeVisible();
+
+    await toolbar.getByRole('button', { name: 'Insert image' }).click();
+    const imageForm = page.getByRole('form', { name: 'Insert image URL' });
+    await imageForm.getByRole('textbox', { name: 'Image URL' }).fill('https://example.com/storm.png');
+    await imageForm.getByRole('button', { name: 'Insert' }).click();
+    await expect(richEditor.locator('img[alt="Image alt"]')).toHaveAttribute('src', 'https://example.com/storm.png');
+
+    await page.getByRole('radio', { name: 'Text editor mode' }).click();
+    await expect(page.getByPlaceholder('Start writing your note...')).toHaveValue(
+      '## **Toolbar text**\n\n- [ ] Task\n\n[Link text](https://example.com)\n\n![Image alt](https://example.com/storm.png)',
+    );
+  });
+
   test('supports notebook and folder creation without breaking navigation', async ({ page }) => {
     await openApp(page);
 

@@ -86,5 +86,6 @@ When working on this project, update this file whenever you learn something dura
 - Browser automation can edit note fields without emitting React `onChange`; note saves should use `input` events as the canonical trigger, and direct automation can use `window.stormdance.setNoteContent(noteId, content)` or related helpers.
 - Rapid title/content edits can race through IndexedDB if saves are allowed to overlap. Preserve the per-note update queue and local merge behavior in `App.tsx` when changing note persistence.
 - Markdown and split rendered panes use a lightweight `contenteditable` rendered document plus DOM-to-Markdown serialization for common structures. Avoid assuming it has the full fidelity of a ProseMirror/TipTap/MDXEditor-style editor unless one of those engines is introduced deliberately.
+- Markdown and split modes share a formatting toolbar. Toolbar actions should update the canonical Markdown text, whether the user last focused the split source textarea or the rendered rich editor.
 - Task list checkboxes are implemented by recognizing Markdown list items that start with `[ ]` or `[x]`; checkbox toggles must update the source Markdown line, not only the rendered input state.
 - `npm run lint` currently reports pre-existing app-wide lint debt. Run targeted ESLint on files you touch, and keep broad cleanup separate from feature work.

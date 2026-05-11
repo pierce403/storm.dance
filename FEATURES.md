@@ -39,6 +39,7 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - The editor can switch between text, split, and markdown modes, with live rendered edits updating note content.
   - Split mode keeps Markdown source and rendered rich-text editing surfaces synchronized.
   - Markdown mode remains editable as a rendered rich-text document and saves common edits back to Markdown.
+  - Split and markdown modes expose a Markdown formatting toolbar for common rich-text actions, including headings, bold, italics, inline code, links, images, quotes, horizontal rules, bulleted lists, numbered lists, and task lists.
   - Markdown task list items render as checkboxes, and checking/unchecking them updates the underlying `- [ ]` or `- [x]` text.
   - The selected editor display mode is restored from local storage after page refresh.
   - Sidebar selection and editor state stay synchronized.
@@ -48,6 +49,7 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - [x] Playwright verifies raw `input` events and `window.stormdance.setNoteContent` persist note content.
   - [x] Playwright verifies the active note tab is restored after reload.
   - [x] Playwright verifies text, split, and rich editable markdown editor modes.
+  - [x] Playwright verifies the Markdown formatting toolbar updates source Markdown and rendered output.
   - [x] Playwright verifies rendered task list checkboxes update Markdown text and persist.
   - [x] Vitest covers collaboration-side note data behavior.
 
