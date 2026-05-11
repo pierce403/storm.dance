@@ -1,79 +1,174 @@
-# Features
+# storm.dance - Features
 
-This document summarizes the storm.dance capabilities and roadmap. Features are grouped into **Stable**, **In Development**, and **Planned** to preserve delivered behavior while keeping upcoming work visible.
+This is the canonical feature inventory for storm.dance. Each feature declares a stability level and testable properties so humans and coding agents can connect product intent to verification.
 
-## Stable Features
+## Feature Stability
 
-### Notebook Lifecycle
-- **Create notebooks via modal**: Users open the creation modal, which seeds the name field with a random adjective/subject pairing. Submitting a non-empty name creates the notebook, places it in the list, and selects it automatically.
-- **Rename notebooks inline**: Selecting rename turns the notebook title into an input; submitting a non-empty, changed value updates persistence and the list entry.
-- **Delete notebooks with confirmation**: Deleting a notebook asks for confirmation, removes contained data, and automatically selects the next available notebook (or clears state if none remain).
-- **Notebook info panel with export/delete controls**: The notebook info view displays identifiers and timestamps and provides export and delete buttons for the active notebook.
+- **stable**: Production-ready behavior expected to keep working.
+- **in-progress**: Implemented or partially implemented behavior that still needs hardening.
+- **planned**: Roadmap behavior that should guide design without being treated as shipped.
+
+## Features
+
+### Local Notebook Management
+- **Stability**: stable
+- **Description**: Users can keep independent notebooks in the browser.
+- **Properties**:
+  - A default notebook named `My Notebook` is created when no notebook exists.
+  - Default notebook creation is idempotent, including under React StrictMode's repeated development effects.
+  - Users can create additional notebooks from a modal seeded with a random adjective/subject pairing.
+  - Users can rename notebooks inline without changing contained notes or folders.
+  - Users can delete a notebook after confirmation, including its notes and folders.
+  - The notebook info panel displays identifiers and timestamps and exposes export/delete controls.
+- **Test Criteria**:
+  - [x] A fresh browser profile shows a selectable default notebook.
+  - [x] A new notebook can be created from the notebook toolbar.
+  - [ ] Notebook rename preserves contained notes.
+  - [ ] Notebook deletion removes associated notes and folders after confirmation.
+
+### Note Editing
+- **Stability**: stable
+- **Description**: Users can create, open, edit, persist, and delete notes.
+- **Properties**:
+  - New notes are created in the selected notebook/folder with the title `Untitled`.
+  - Title and content edits persist to IndexedDB.
+  - Reloading the app preserves saved notes.
+  - Recently opened notes appear as tabs.
+  - Sidebar selection and editor state stay synchronized.
+  - Deleting a note removes it from the sidebar and any open editor tab.
+- **Test Criteria**:
+  - [x] Playwright creates, edits, reloads, reopens, and deletes a note.
+  - [x] Vitest covers collaboration-side note data behavior.
+  - [ ] Markdown preview behavior is verified once preview controls are active.
 
 ### Folder Organization
-- **Hierarchical folders**: Users can create folders (and subfolders) within a notebook, rename them inline, and drag/drop notes or folders to organize content; folder paths are preserved when exporting/importing.
-- **Folder deletion**: Removing a folder clears its notes/folders from the hierarchy and updates the view accordingly.
-
-### Note Management
-- **Create, edit, delete notes**: Notes belong to the selected notebook/folder, support Markdown editing, and update their metadata when changed. Notes can be removed individually from the list.
-- **Tabbed editing and selection**: Recently opened notes appear as tabs; clicking a note selects it for editing, and the sidebar keeps the active note synchronized with the editor.
-- **Keyboard and focus affordances**: Sidebar items expose focus helpers so keyboard navigation remains aligned with selection and rename flows.
+- **Stability**: stable
+- **Description**: Users can group notes in a notebook-specific folder tree.
+- **Properties**:
+  - Users can create root folders and subfolders in the selected notebook.
+  - Folder rows expand and collapse nested content.
+  - Users can rename folders inline.
+  - Deleting a folder reparents child notes and folders to the deleted folder's parent.
+  - Drag-and-drop can move notes and folders without creating folder cycles.
+  - Folder paths are preserved during backup export/import.
+- **Test Criteria**:
+  - [x] Playwright creates and toggles a root folder.
+  - [ ] Folder deletion reparents child content.
+  - [ ] Drag-and-drop move behavior rejects self or descendant folder drops.
 
 ### Backup, Import, and Export
-- **Encrypted notebook backups**: The notebook info panel exports the selected notebook (including folders and notes) as a password-encrypted JSON file with normalized filenames.
-- **Validated, passworded import**: Import accepts only `.json` or `.json.encrypted` files under 50 MB, prompts for the export password, decrypts the payload, recreates the notebook/folder tree, and imports notes before selecting the new notebook.
+- **Stability**: stable
+- **Description**: Users can export encrypted notebook backups and import encrypted or plain JSON backups.
+- **Properties**:
+  - Imports accept `.json.encrypted` and `.json` files only.
+  - Imports reject files over 50 MB.
+  - Encrypted imports require a password before data is restored.
+  - Imports recreate the notebook/folder tree, import notes, and select the restored notebook.
+  - Exports serialize notebook, folder, and note data into a password-encrypted backup with a normalized filename.
+- **Test Criteria**:
+  - [ ] Invalid import extensions show a destructive toast.
+  - [ ] Encrypted import with a valid password creates a notebook with restored content.
+  - [ ] Export requires a non-empty password.
 
-### UI and Theming
-- **Theme toggle**: A top-bar control switches between light and dark themes, persists the preference to `localStorage`, and initializes using the stored or system preference.
-- **Status indicators**: The top bar surfaces IPFS and XMTP status pills so users can quickly tell whether messaging and decentralized storage services are reachable.
-
-### Data Storage and Reliability
-- **IndexedDB-backed persistence**: Notes, folders, and notebooks are stored locally via IndexedDB services for offline-friendly usage.
-- **Blocked database recovery**: If the IndexedDB upgrade path is blocked (e.g., another tab open), the app shows a blocking screen with guidance and a one-click storage clear to recover.
-
-## In Development
+### Responsive Application Shell
+- **Stability**: stable
+- **Description**: The app presents notebook navigation, note navigation, editor surfaces, and status controls across desktop and mobile viewports.
+- **Properties**:
+  - Desktop layouts keep notebook and editor regions visible side by side.
+  - Mobile layouts stack navigation and editor regions without horizontal overflow.
+  - A top-bar control switches between light and dark themes and persists the preference to local storage.
+  - The initial theme uses stored preference first, then system preference.
+  - IPFS and XMTP status indicators remain visible in the top bar.
+  - Blocked IndexedDB upgrades show a recovery screen with guidance and storage-clear action.
+- **Test Criteria**:
+  - [x] Playwright checks desktop and mobile shell screenshots.
+  - [x] Playwright checks for horizontal overflow at desktop and mobile widths.
+  - [x] Playwright verifies the light-to-dark theme toggle state change.
 
 ### XMTP Identity and Connection Management
-- **Local XMTP identity creation**: Users without an identity can generate a local XMTP-compatible keypair from the connection modal and store it for subsequent sessions.
-- **Connection modal with environment toggle**: The XMTP status chip opens a modal showing connection state, address, and network environment (dev/production) with a toggle disabled while connected.
-- **Debug logging toggle**: The modal includes a switch to enable or disable verbose XMTP console logging during collaboration or invite handling.
-- **Connect/Disconnect controls**: Users can connect or disconnect from XMTP directly from the modal; the UI shows active conversations, connected notebook count, and status icons for quick feedback.
+- **Stability**: in-progress
+- **Description**: Users can create or reuse an XMTP identity and manage connection state from the top bar.
+- **Properties**:
+  - Users without an identity can generate a local XMTP-compatible keypair from the connection modal.
+  - The XMTP status chip opens a modal showing connection state, address, active conversations, connected notebook count, and network environment.
+  - Users can toggle between dev and production environments when disconnected.
+  - Users can connect or disconnect from XMTP from the modal.
+  - A debug logging switch controls verbose XMTP console output.
+  - The SDK must be `@xmtp/browser-sdk` v5 or newer.
+  - XMTP clients are created with `Client.create(signer, { env })`.
+  - Ethereum identifiers use `{ identifierKind: 'Ethereum', identifier: address }`.
+- **Test Criteria**:
+  - [ ] Browser tests cover the connection modal without requiring live XMTP network calls.
+  - [ ] Network environment toggling is covered while disconnected.
+  - [ ] Debug logging state is covered in the modal.
 
 ### Collaboration Over XMTP
-- **Contact management with ENS resolution**: Collaborators can be added via ENS name or address; reachability is verified with XMTP before adding to the contact list, and contacts can be removed.
-- **Start/stop collaboration sessions**: A collaboration session can be started for the selected notebook; the hook opens an XMTP topic, stores it on the notebook, and broadcasts local CRDT updates while active. Stopping the session tears down the stream and clears session state.
-- **Invite handling**: Incoming XMTP messages are streamed; valid invite payloads open an invite modal where users can accept or reject collaboration. Accepting adds the inviter as a contact and joins the notebook session.
-- **Remote updates persistence**: Remote CRDT updates are merged into local state and persisted to IndexedDB so remote edits stay synchronized across sessions.
+- **Stability**: in-progress
+- **Description**: Users can coordinate notebook collaboration sessions over XMTP.
+- **Properties**:
+  - Collaborators can be added by ENS name or Ethereum address.
+  - Reachability is verified through XMTP before contacts are used for collaboration.
+  - A collaboration session can be started for the selected notebook.
+  - Starting collaboration opens DM conversations, sends invite payloads, and stores the notebook topic.
+  - Local note updates can be broadcast as CRDT update payloads.
+  - Incoming invite payloads can be accepted or rejected.
+  - Remote CRDT updates merge into local state and persist to IndexedDB.
+  - Stopping collaboration tears down active streams and clears session state.
+- **Test Criteria**:
+  - [x] Vitest covers ENS/address resolution.
+  - [x] Vitest covers collaboration broadcast and duplicate remote update handling.
+  - [ ] Browser tests cover invite acceptance/rejection without live XMTP network calls.
+  - [ ] Multi-client collaboration tests cover remote note update application.
 
-## Planned Features
+### IPFS Status and Decentralized Storage
+- **Stability**: in-progress
+- **Description**: The UI surfaces IPFS connectivity and prepares for decentralized note persistence.
+- **Properties**:
+  - The status indicator checks a local IPFS API endpoint before trying a public gateway.
+  - Users can configure a custom endpoint from the IPFS status control.
+  - Failed IPFS checks degrade to an offline status without blocking local note editing.
+- **Test Criteria**:
+  - [x] Playwright mocks failed IPFS calls and verifies the app still loads.
+  - [ ] Settings changes persist to local storage.
+  - [ ] Successful local and gateway statuses are covered with mocked responses.
 
-### Phase 2: Web3 Identity & Encryption
-- **Wallet Connection:** Integrate Ethereum wallet connection (e.g., MetaMask) for user identity (`wagmi`/`viem`/`ethers.js`).
-- **Client-Side Encryption:** Encrypt note content in the browser before storage, using keys derived from wallet signatures (Web Crypto API, AES-GCM/XChaCha20, KDF like HKDF).
+### Web3 Identity and Encryption Roadmap
+- **Stability**: planned
+- **Description**: storm.dance is intended to evolve into a decentralized, encrypted, collaborative notes app.
+- **Properties**:
+  - Client-side encryption should happen before decentralized storage.
+  - Ethereum wallet identity should interoperate with collaboration and publishing.
+  - Data pointer mechanisms may use an L2 contract, ENS/IPNS, ENS/CCIP-Read, Ceramic, or XMTP-centric discovery.
+  - Farcaster friend syncing may bootstrap social connections.
+  - Encrypted CRDT synchronization must account for key sharing and conflict resolution.
+- **Test Criteria**:
+  - [ ] Encryption round-trips note data before any remote storage write.
+  - [ ] Identity-derived keys or key wrapping are specified before implementation.
+  - [ ] Sync transport behavior is tested with conflicting edits.
 
-### Phase 3: Decentralized Storage & Discovery
-- **IPFS Integration:** Upload encrypted notes to IPFS for persistence beyond the browser (`Helia`, Pinning Services like Pinata).
-- **Data Pointer Mechanism:** Implement a system to track the latest IPFS CID for a user's notes. Options include:
-  - Simple L2 Smart Contract (e.g., "IPCM" on Base/Optimism).
-  - ENS + IPNS.
-  - ENS + CCIP-Read gateway.
-  - Ceramic Network (DID/Streams).
+## Technology Constraints
 
-### Phase 4: Interoperability & Social Features
-- **Standalone Follower Node (Optional):** A server-side component to monitor and cache data from followed users.
-- **Farcaster Friend Syncing:** Import Farcaster follow graph to bootstrap social connections within the app (Neynar API / Hub API).
-- **ENS Publishing:** Allow users to publish their data root pointer (IPCM address, CID, DID) to their ENS name for discoverability (Text Records / CCIP-Read).
+- **Framework**: React 18
+- **Build Tool**: Vite 6
+- **Language**: TypeScript 5.6
+- **Styling**: Tailwind CSS 3.4 with Radix UI primitives and shadcn-style component patterns
+- **Icons**: Lucide React
+- **Local Database**: IndexedDB through `idb`
+- **Forms**: React Hook Form and Zod
+- **Date Handling**: date-fns
+- **Messaging**: `@xmtp/browser-sdk` 5.0.1
+- **Ethereum**: Ethers.js 6
+- **Polyfills**: `vite-plugin-node-polyfills`, `buffer`, `crypto-browserify`, and `stream-browserify`
 
-### Phase 5 (Potential): Real-Time Collaboration
-- **CRDT Synchronization:** Enable real-time, conflict-free collaborative editing using CRDTs (`Yjs` / `Automerge`).
-- **Sync Transport:** Implement a synchronization mechanism (WebRTC / WebSocket Relay / XMTP).
-- **Challenge:** Address the significant complexity of synchronizing *encrypted* CRDT data.
+## UX Implementation Notes
 
-### Alternative Approach: XMTP-Centric Integration
-- Explore deeper integration with **XMTP** for:
-  - Identity and discovery.
-  - Secure group management for shared notes (using MLS).
-  - Transporting CRDT updates or data pointers (via custom content types or remote attachments).
-  - Securely sharing encryption keys for collaboration within groups.
+### Inline Action Buttons
+- Action buttons inside clickable rows must stop propagation on click.
+- Buttons that sit inside selectable rows often also need `onMouseDown={(e) => e.stopPropagation()}` so focus and row selection do not fire first.
+- Reserve horizontal space for row actions so long text does not run underneath absolutely positioned buttons.
+- Notebook and note actions should be visible on hover, focus, or selected state so touch and keyboard users can discover them.
 
-*(Speculative implementation notes and historical details remain available in prior revisions for reference.)*
+### Keyboard Navigation
+- Pressing `Tab` while focused on a column container cycles Notebooks -> Notes -> Editor.
+- Editable elements such as `input`, `textarea`, `select`, `button`, and `contenteditable` bypass custom tab handling.
+- Pressing `n` in the notes tree creates a note in the focused folder or in the focused note's folder.

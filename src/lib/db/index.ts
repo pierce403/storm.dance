@@ -61,6 +61,7 @@ export const DB_NAME = 'storm.dance';
 const DB_VERSION = 5;
 
 let dbPromise: Promise<IDBPDatabase<StormDanceDB>> | null = null;
+let ensureDefaultNotebookPromise: Promise<Notebook> | null = null;
 
 const initDB = (): Promise<IDBPDatabase<StormDanceDB>> => {
   if (dbPromise) {
@@ -81,9 +82,8 @@ const initDB = (): Promise<IDBPDatabase<StormDanceDB>> => {
         (async () => { // IIFE for async operation within upgrade
           let cursor = await store.openCursor();
           while (cursor) {
-            const value = cursor.value as any; // Cast to any for migration
-            const aesKey = value.aesKey;
-            const { aesKey: _removed, ...rest } = value; // Use different name for removed key
+            const value = cursor.value as Notebook & { aesKey?: unknown };
+            const { aesKey, ...rest } = value;
             if (aesKey !== undefined) {
               await cursor.update(rest);
             }
@@ -184,12 +184,20 @@ export const dbService = {
   getDb: initDB,
 
   async _ensureDefaultNotebook(): Promise<Notebook> {
-    const db = await this.getDb();
-    const allNotebooks = await db.getAll('notebooks'); // No key check needed now
-    if (allNotebooks.length > 0) {
-      return allNotebooks.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    if (!ensureDefaultNotebookPromise) {
+      ensureDefaultNotebookPromise = (async () => {
+        const db = await this.getDb();
+        const allNotebooks = await db.getAll('notebooks'); // No key check needed now
+        if (allNotebooks.length > 0) {
+          return allNotebooks.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+        }
+        return this.createNotebook({ name: 'My Notebook' });
+      })().finally(() => {
+        ensureDefaultNotebookPromise = null;
+      });
     }
-    return this.createNotebook({ name: 'My Notebook' });
+
+    return ensureDefaultNotebookPromise;
   },
 
   async getAllNotebooks(): Promise<Notebook[]> {
