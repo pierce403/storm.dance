@@ -250,6 +250,7 @@ function App() {
   const notebooksRef = useRef(notebooks);
   const notesRef = useRef(notes);
   const foldersRef = useRef(folders);
+  const noteUpdateQueuesRef = useRef<Map<string, Promise<Note | undefined>>>(new Map());
 
   const getNoteById = (id: string | null): Note | null => {
     if (!id) return null;
@@ -577,20 +578,47 @@ function App() {
     }
   };
 
-  const handleUpdateNote = useCallback(async (id: string, updates: ProgrammaticNoteUpdates): Promise<Note | undefined> => {
-    try {
-      const updatedNote = await dbService.updateNote(id, updates);
+  const handleUpdateNote = useCallback((id: string, updates: ProgrammaticNoteUpdates): Promise<Note | undefined> => {
+    const previousUpdate = noteUpdateQueuesRef.current.get(id) || Promise.resolve(undefined);
 
-      if (updatedNote) {
-        setNotes(prevNotes => prevNotes.map(note => note.id === id ? updatedNote : note));
-        await broadcastLocalUpdate(updatedNote);
+    const queuedUpdate = previousUpdate
+      .catch(() => undefined)
+      .then(async (): Promise<Note | undefined> => {
+        try {
+          const updatedNote = await dbService.updateNote(id, updates);
+
+          if (!updatedNote) {
+            return undefined;
+          }
+
+          let noteForBroadcast: Note = updatedNote;
+          setNotes(prevNotes => {
+            const nextNotes = prevNotes.map(note => {
+              if (note.id !== id) return note;
+
+              noteForBroadcast = { ...note, ...updates, updatedAt: updatedNote.updatedAt };
+              return noteForBroadcast;
+            });
+            notesRef.current = nextNotes;
+            return nextNotes;
+          });
+          await broadcastLocalUpdate(noteForBroadcast);
+          return noteForBroadcast;
+        } catch (error) {
+          console.error('Failed to update note:', error);
+          showToast('Error', 'Failed to update note', 'destructive');
+          return undefined;
+        }
+      });
+
+    noteUpdateQueuesRef.current.set(id, queuedUpdate);
+    queuedUpdate.finally(() => {
+      if (noteUpdateQueuesRef.current.get(id) === queuedUpdate) {
+        noteUpdateQueuesRef.current.delete(id);
       }
-      return updatedNote;
-    } catch (error) {
-      console.error('Failed to update note:', error);
-      showToast('Error', 'Failed to update note', 'destructive');
-      return undefined;
-    }
+    });
+
+    return queuedUpdate;
   }, [broadcastLocalUpdate, showToast]);
 
   const createProgrammaticNote = useCallback(async (input: ProgrammaticNoteUpdates = {}): Promise<Note | null> => {

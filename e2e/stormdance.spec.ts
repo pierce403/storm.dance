@@ -177,16 +177,22 @@ test.describe('storm.dance notes', () => {
 
     await markdownMode.click();
     await expect(markdownMode).toHaveAttribute('aria-checked', 'true');
-    await expect(page.getByPlaceholder('Start writing your note...')).toHaveCount(0);
+    await expect(content).toBeVisible();
     await expect(preview.getByRole('heading', { name: 'Markdown Heading' })).toBeVisible();
+
+    const editedInMarkdownMode = '## Live edit\n\nUpdated while markdown mode is active.';
+    await content.fill(editedInMarkdownMode);
+    await expect(preview.getByRole('heading', { name: 'Live edit' })).toBeVisible();
+    await expect(preview).toContainText('Updated while markdown mode is active.');
 
     await page.reload();
     await expect(page.getByRole('heading', { name: 'storm.dance' })).toBeVisible();
     await expect(page.getByRole('radio', { name: 'Markdown editor mode' })).toHaveAttribute('aria-checked', 'true');
-    await expect(page.getByRole('region', { name: 'Rendered markdown preview' })).toContainText('Fresh preview text');
+    await expect(page.getByPlaceholder('Start writing your note...')).toHaveValue(editedInMarkdownMode);
+    await expect(page.getByRole('region', { name: 'Rendered markdown preview' })).toContainText('Updated while markdown mode is active.');
 
     await page.getByRole('radio', { name: 'Text editor mode' }).click();
-    await expect(page.getByPlaceholder('Start writing your note...')).toHaveValue(`${markdown}\n\nFresh preview text`);
+    await expect(page.getByPlaceholder('Start writing your note...')).toHaveValue(editedInMarkdownMode);
   });
 
   test('supports notebook and folder creation without breaking navigation', async ({ page }) => {

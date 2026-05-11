@@ -36,7 +36,8 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - Reloading the app preserves saved notes.
   - Recently opened notes appear as tabs.
   - Selected notebook, open note tabs, and active note are restored from local storage after page refresh.
-  - The editor can switch between text, split, and rendered markdown modes, with live preview updates as note content changes.
+  - The editor can switch between text, split, and markdown modes, with live preview updates as note content changes.
+  - Markdown mode remains editable, showing the note's Markdown source and rendered output in one live editing surface.
   - The selected editor display mode is restored from local storage after page refresh.
   - Sidebar selection and editor state stay synchronized.
   - Deleting a note removes it from the sidebar and any open editor tab.
@@ -44,7 +45,7 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - [x] Playwright creates, edits, reloads, reopens, and deletes a note.
   - [x] Playwright verifies raw `input` events and `window.stormdance.setNoteContent` persist note content.
   - [x] Playwright verifies the active note tab is restored after reload.
-  - [x] Playwright verifies text, split, and rendered markdown editor modes.
+  - [x] Playwright verifies text, split, and editable markdown editor modes.
   - [x] Vitest covers collaboration-side note data behavior.
 
 ### Folder Organization
