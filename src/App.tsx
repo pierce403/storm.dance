@@ -188,7 +188,20 @@ function App() {
     if (!id) return null;
     return notes.find(note => note.id === id) || null;
   }
+  const selectedNotebook = notebooks.find(notebook => notebook.id === selectedNotebookId) || null;
   const activeNote = getNoteById(activeNoteId);
+  const workspaceStatus = isLoading
+    ? 'Stormdance workspace loading.'
+    : [
+      'Stormdance workspace ready.',
+      selectedNotebook ? `Selected notebook: ${selectedNotebook.name}.` : 'No notebook selected.',
+      activeNote ? `Selected note: ${activeNote.title || 'Untitled'}.` : 'No note selected.',
+      `${notes.length} notes and ${folders.length} folders in the selected notebook.`,
+      `${openNoteIds.length} editor tabs open.`,
+      `Editor column: ${activeNote ? 'editing a note' : 'empty'}.`,
+      `XMTP status: ${xmtpStatus} on ${xmtpNetworkEnv}.`,
+      `Collaboration status: ${collaborationStatus}.`,
+    ].join(' ');
 
   const showToast = (title: string, description: string, variant: 'default' | 'destructive' = 'default') => {
     setToastMessage({ title, description, variant });
@@ -780,8 +793,22 @@ function App() {
         debugLoggingEnabled={debugLoggingEnabled}
         setDebugLoggingEnabled={setDebugLoggingEnabled}
       />
+      <div
+        id="workspace-status"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {workspaceStatus}
+      </div>
 
-      <main className="min-h-0 flex-1 overflow-hidden pt-2">
+      <main
+        className="min-h-0 flex-1 overflow-hidden pt-2"
+        aria-label="Stormdance workspace"
+        aria-describedby="workspace-status"
+        aria-keyshortcuts="Tab Shift+Tab"
+      >
         <div className="flex h-full min-h-0 flex-col gap-3 lg:flex-row lg:gap-4">
           <div
             className="w-full lg:w-1/3 xl:w-1/4 min-h-[38vh] lg:min-h-0 lg:max-w-[360px] border border-gray-200/70 dark:border-gray-800/70 flex flex-col bg-white/80 dark:bg-gray-950/70 rounded-2xl backdrop-blur mobile-card"
@@ -834,6 +861,9 @@ function App() {
             ref={editorRef}
             tabIndex={0}
             onFocus={() => setActiveColumn('editor')}
+            role="region"
+            aria-label={activeNote ? `Editor for note ${activeNote.title || 'Untitled'}` : 'Editor'}
+            aria-describedby="workspace-status"
           >
             {isLoading ? (
               <div className="flex items-center justify-center h-full rounded-2xl border border-gray-200/70 dark:border-gray-800/70 bg-white/80 dark:bg-gray-900/80 mobile-card text-muted-foreground">

@@ -20,7 +20,11 @@ export function EditorTabs({
   const openNotes = openNoteIds.map(id => notes.find(note => note.id === id)).filter((note): note is Note => note !== undefined);
 
   return (
-    <div className="flex border-b border-gray-200 dark:border-yellow-400/50 bg-gray-100 dark:bg-gray-900 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 dark:scrollbar-thumb-gray-600 dark:hover:scrollbar-thumb-gray-500">
+    <div
+      className="flex border-b border-gray-200 dark:border-yellow-400/50 bg-gray-100 dark:bg-gray-900 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 dark:scrollbar-thumb-gray-600 dark:hover:scrollbar-thumb-gray-500"
+      role="tablist"
+      aria-label="Open notes"
+    >
       {openNotes.map((note) => (
         <div
           key={note.id}
@@ -28,6 +32,16 @@ export function EditorTabs({
             ? 'bg-white dark:bg-gray-950 text-gray-900 dark:text-yellow-100 font-medium border-b-2 border-yellow-400 -mb-px'
             : 'bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`}
           onClick={() => onSelectTab(note.id)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              onSelectTab(note.id);
+            }
+          }}
+          role="tab"
+          aria-selected={activeNoteId === note.id}
+          aria-label={`Open note ${note.title || 'Untitled'}`}
+          tabIndex={activeNoteId === note.id ? 0 : -1}
         >
           <span className="mr-2 truncate">{note.title || 'Untitled'}</span>
           <button
@@ -43,4 +57,4 @@ export function EditorTabs({
       {/* Optional: Add a flexible spacer or a button to show more tabs if overflow happens */}
     </div>
   );
-} 
+}

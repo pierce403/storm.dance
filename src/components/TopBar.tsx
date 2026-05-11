@@ -58,8 +58,20 @@ export function TopBar({
         {/* Right side: Status indicators and theme toggle */}
         <div className="flex flex-wrap items-center gap-2 text-sm">
           {onFileChange && (
-            <label className={`px-3 py-1.5 text-xs rounded-full flex items-center cursor-pointer transition-colors mobile-card bg-white/70 hover:bg-white dark:bg-gray-800 dark:hover:bg-gray-700 ${isImporting ? 'opacity-50 cursor-not-allowed' : ''
-              }`}>
+            <label
+              className={`px-3 py-1.5 text-xs rounded-full flex items-center cursor-pointer transition-colors mobile-card bg-white/70 hover:bg-white dark:bg-gray-800 dark:hover:bg-gray-700 ${isImporting ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+              role="button"
+              tabIndex={isImporting ? -1 : 0}
+              aria-label="Import notebook backup"
+              aria-disabled={isImporting}
+              onKeyDown={(event) => {
+                if ((event.key === 'Enter' || event.key === ' ') && !isImporting) {
+                  event.preventDefault();
+                  event.currentTarget.querySelector('input')?.click();
+                }
+              }}
+            >
               <Upload size={14} className="mr-1.5" />
               Import
               <input
@@ -68,6 +80,7 @@ export function TopBar({
                 accept=".json,.json.encrypted"
                 onChange={onFileChange}
                 disabled={isImporting}
+                aria-label="Import notebook backup file"
               />
             </label>
           )}

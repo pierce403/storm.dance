@@ -1,11 +1,9 @@
-import React, { useState, useEffect, useRef, RefObject, KeyboardEvent, forwardRef, useImperativeHandle } from 'react';
+import React, { useState, useEffect, useRef, RefObject, forwardRef, useImperativeHandle } from 'react';
 import { Plus, Trash2, Book, Loader2, ChevronRight, ChevronDown, Folder as FolderIcon, Edit2, Info, Key, AlertCircle, Download, Users } from 'lucide-react';
 import { Note, Notebook, Folder, dbService } from '../../lib/db';
-import { XmtpConnect } from '../xmtp/XmtpConnect';
 import type { BrowserClient } from '@/lib/xmtp-browser-sdk';
 import { encryptBackup } from '../../lib/cryptoUtils';
 import { saveAs } from 'file-saver';
-import { NotebookCollaborationPanel } from './NotebookCollaborationPanel'; // Can remove if unused
 import { CollaborationManagerModal } from '@/components/collaboration/CollaborationManagerModal';
 import { CollaborationContact } from '@/lib/collaboration/types';
 import { CollaborationStatus } from '@/hooks/useNotebookCollaboration';
@@ -64,15 +62,6 @@ interface SidebarProps {
 // Wrap component with forwardRef
 export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
   {
-    // Updated XMTP props
-    xmtpClient,
-    onXmtpConnected,
-    onXmtpDisconnected,
-    onXmtpError,
-    initialXmtpNetworkEnv,
-    triggerXmtpConnect,
-    triggerXmtpDisconnect,
-
     // Existing props
     notebooks,
     selectedNotebookId,
@@ -257,7 +246,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     const sidebarElement = containerRef?.current;
     if (!sidebarElement) return;
 
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
       // Skip if editing inputs/textareas or in specific UI states
       if (
         e.target instanceof HTMLInputElement ||
@@ -378,9 +367,9 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
       }
     };
 
-    sidebarElement.addEventListener('keydown', handleKeyDown as any);
+    sidebarElement.addEventListener('keydown', handleKeyDown);
     return () => {
-      sidebarElement.removeEventListener('keydown', handleKeyDown as any);
+      sidebarElement.removeEventListener('keydown', handleKeyDown);
     };
   }, [
     // Updated dependencies
@@ -442,7 +431,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     // setDragOverTargetId(null); // This might flicker
   };
 
-  const handleDragEnd = (_e: React.DragEvent) => {
+  const handleDragEnd = () => {
     // Always clear drag state when drag operation ends (successfully or not)
     setDraggedItemId(null);
     setDraggedItemType(null);
@@ -515,7 +504,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
   const renderFolderTree = (parentFolderId: string | null, depth: number = 0): JSX.Element[] => {
     const folderList = parentFolderId === null ? getRootFolders() : getChildFolders(parentFolderId);
     const noteList = getNotesInFolder(parentFolderId);
-    let renderedElements: JSX.Element[] = [];
+    const renderedElements: JSX.Element[] = [];
 
     folderList.forEach(folder => {
       const isExpanded = expandedFolders.has(folder.id);
@@ -535,7 +524,10 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
             onDragEnd={handleDragEnd} // Add drag end handler
             ref={registerRef('folder', folder.id)}
             tabIndex={-1}
+            id={`folder-${folder.id}`}
             data-folder-id={folder.id}
+            role="treeitem"
+            aria-label={`Folder ${folder.name}`}
             aria-expanded={isExpanded}
           >
             <button
@@ -611,8 +603,12 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
             className={`w-full text-left px-3 py-1 my-px rounded-sm text-sm draggable-note focus:outline-none focus:ring-1 focus:ring-yellow-400 focus:bg-yellow-100 dark:focus:bg-yellow-900/30 ${selectedNoteId === note.id ? 'bg-yellow-100 dark:bg-yellow-900/30 font-medium text-yellow-900 dark:text-yellow-100' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
             onClick={() => onSelectNote(note)}
             data-note-id={note.id}
+            id={`note-${note.id}`}
             ref={registerRef('note', note.id)}
             tabIndex={-1}
+            role="treeitem"
+            aria-label={`Note ${note.title || 'Untitled'}`}
+            aria-selected={selectedNoteId === note.id}
           >
             <span className="block truncate select-none">{note.title || 'Untitled'}</span>
           </button>
@@ -658,14 +654,15 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     }
   }));
 
-  // Pass the xmtpClient to the connection status indicator
-  const xmtpConnected = !!xmtpClient;
   const selectedNotebook = notebooks.find(nb => nb.id === selectedNotebookId) || null;
 
   return (
     <div
       ref={containerRef}
       tabIndex={-1}
+      role="navigation"
+      aria-label="Notebook and note navigation"
+      aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Enter N"
       className="h-full flex flex-col border-r focus:outline-none"
     >
 
@@ -693,7 +690,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
           </div>
         </div>
         {/* Notebook List */}
-        <ul className="space-y-1 mt-2">
+        <ul className="space-y-1 mt-2" role="listbox" aria-label="Notebooks">
           {notebooks.map((notebook) => (
             <li key={notebook.id} className="relative group">
               {renamingNotebookId === notebook.id ? (
@@ -714,7 +711,8 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
               ) : (
                 <>
                   <div className={`relative w-full flex items-center rounded-md text-sm group ${selectedNotebookId === notebook.id ? "bg-gray-200 dark:bg-yellow-900/30 font-medium dark:text-yellow-100" : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}>
-                    <div
+                    <button
+                      type="button"
                       className="flex-1 flex items-center px-3 py-2 cursor-pointer min-w-0"
                       onClick={() => onSelectNotebook(notebook.id)}
                       tabIndex={0}
@@ -725,10 +723,13 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
                         }
                       }}
                       data-notebook-id={notebook.id}
+                      role="option"
+                      aria-selected={selectedNotebookId === notebook.id}
+                      aria-label={`Notebook ${notebook.name}${selectedNotebookId === notebook.id ? ', selected' : ''}`}
                     >
                       <Book className="h-4 w-4 mr-2 flex-shrink-0 text-gray-500 dark:text-gray-400" />
                       <span className="truncate text-left">{notebook.name}</span>
-                    </div>
+                    </button>
 
                     {/* Action Buttons - Visible on Hover or Selected */}
                     <div className={`flex items-center gap-1 pr-2 transition-opacity ${selectedNotebookId === notebook.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
@@ -802,6 +803,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
               title="Create new note (n)"
               disabled={!selectedNotebookId || isLoading}
               aria-label="Create new note"
+              aria-keyshortcuts="N"
               tabIndex={-1}
             >
               <Plus className="h-5 w-5" />
@@ -859,6 +861,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
               className="space-y-px list-none p-0 m-0"
               aria-label="Notes and Folders"
               role="tree"
+              aria-activedescendant={selectedNoteId ? `note-${selectedNoteId}` : undefined}
             // Removed drag handlers from ul, handled by the wrapping div now
             >
               {renderFolderTree(null)}

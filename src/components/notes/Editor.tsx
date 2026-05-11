@@ -49,6 +49,7 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
         value={note.title || ''}
         onChange={handleTitleChange}
         placeholder="Note Title"
+        aria-label="Note title"
         className="text-2xl font-bold mb-4 p-2 border-b bg-transparent border-gray-300 dark:border-gray-700 focus:outline-none focus:border-yellow-400 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
       />
       <textarea
@@ -56,6 +57,7 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
         value={note.content || ''}
         onChange={handleContentChange}
         placeholder="Start writing your note..."
+        aria-label="Note content"
         className="min-h-0 flex-1 w-full resize-none bg-transparent p-2 focus:outline-none dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
       />
     </div>

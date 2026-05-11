@@ -20,6 +20,8 @@ async function openApp(page: Page) {
   await expect(page.getByRole('heading', { name: 'storm.dance' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Notebooks' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Notes' })).toBeVisible();
+  await expect(page.getByRole('status')).toContainText('Stormdance workspace');
+  await expect(page.getByRole('button', { name: 'Import notebook backup' })).toBeVisible();
   await expect(page.getByText('IPFS Offline')).toBeVisible({ timeout: 10_000 });
 }
 
@@ -81,6 +83,7 @@ test.describe('storm.dance notes', () => {
 
     const createNote = page.getByRole('button', { name: 'Create new note', exact: true });
     await expect(createNote).toBeEnabled();
+    await expect(createNote).toHaveAttribute('aria-keyshortcuts', 'N');
     await createNote.click();
 
     const title = page.getByPlaceholder('Note Title');
@@ -89,8 +92,10 @@ test.describe('storm.dance notes', () => {
     await title.fill('E2E Note');
     await content.fill('Line one\nLine two');
 
-    const noteButton = page.getByRole('button', { name: /^E2E Note$/ });
+    const noteButton = page.getByRole('treeitem', { name: 'Note E2E Note' });
     await expect(noteButton).toBeVisible();
+    await expect(noteButton).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('status')).toContainText('Selected note: E2E Note.');
     await expect(content).toHaveValue('Line one\nLine two');
     await expectTextareaReachesPageBottom(page);
     await expectStoredNote(page, 'E2E Note', 'Line one\nLine two');
@@ -117,7 +122,9 @@ test.describe('storm.dance notes', () => {
     await page.getByRole('button', { name: 'Create Notebook' }).click();
 
     await expect(page.getByText('Notebook "Field Notes" created')).toBeVisible();
-    await expect(page.locator('[data-notebook-id]').filter({ hasText: 'Field Notes' })).toBeVisible();
+    const selectedNotebook = page.getByRole('option', { name: /Notebook Field Notes, selected/ });
+    await expect(selectedNotebook).toBeVisible();
+    await expect(selectedNotebook).toHaveAttribute('aria-selected', 'true');
 
     await page.getByRole('button', { name: 'Create new root folder', exact: true }).click();
     await page.getByPlaceholder('Folder name').fill('Research');
