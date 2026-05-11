@@ -23,6 +23,92 @@ html, body, #root {
 .draggable-note:active { cursor: grabbing; }
 .drag-over { background-color: rgba(59, 130, 246, 0.2); border-radius: 0.375rem; }
 
+/* Rendered note markdown */
+.stormdance-markdown-preview {
+  overflow-wrap: anywhere;
+}
+
+.stormdance-markdown-preview > * + * {
+  margin-top: 0.75rem;
+}
+
+.stormdance-markdown-preview h1 {
+  font-size: 1.5rem;
+  line-height: 2rem;
+  font-weight: 700;
+}
+
+.stormdance-markdown-preview h2 {
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+  font-weight: 700;
+}
+
+.stormdance-markdown-preview h3 {
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+  font-weight: 700;
+}
+
+.stormdance-markdown-preview ul,
+.stormdance-markdown-preview ol {
+  padding-left: 1.5rem;
+}
+
+.stormdance-markdown-preview ul {
+  list-style: disc;
+}
+
+.stormdance-markdown-preview ol {
+  list-style: decimal;
+}
+
+.stormdance-markdown-preview blockquote {
+  border-left: 3px solid #eab308;
+  color: #475569;
+  padding-left: 1rem;
+}
+
+.stormdance-markdown-preview code {
+  background: rgba(15, 23, 42, 0.08);
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+  padding: 0.125rem 0.25rem;
+}
+
+.stormdance-markdown-preview pre {
+  background: #111827;
+  border-radius: 0.5rem;
+  color: #f9fafb;
+  overflow-x: auto;
+  padding: 0.75rem;
+}
+
+.stormdance-markdown-preview pre code {
+  background: transparent;
+  border-radius: 0;
+  color: inherit;
+  padding: 0;
+}
+
+.stormdance-markdown-preview a {
+  color: #0f766e;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.dark .stormdance-markdown-preview blockquote {
+  color: #cbd5e1;
+}
+
+.dark .stormdance-markdown-preview code {
+  background: rgba(248, 250, 252, 0.12);
+}
+
+.dark .stormdance-markdown-preview a {
+  color: #5eead4;
+}
+
 /* Folder editing styles */
 .folder-edit-form { margin: 0; padding: 0; display: flex; align-items: center; }
 .folder-edit-input {

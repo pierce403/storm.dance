@@ -148,6 +148,47 @@ test.describe('storm.dance notes', () => {
     await expect(noteButton).toHaveCount(0);
   });
 
+  test('switches between text, split, and markdown editor modes', async ({ page }) => {
+    await openApp(page);
+
+    await page.getByRole('button', { name: 'Create new note', exact: true }).click();
+    await page.getByPlaceholder('Note Title').fill('Markdown E2E');
+
+    const content = page.getByPlaceholder('Start writing your note...');
+    const markdown = '# Markdown Heading\n\n- one\n- two\n\n**Bold line**';
+    await content.fill(markdown);
+
+    const textMode = page.getByRole('radio', { name: 'Text editor mode' });
+    const splitMode = page.getByRole('radio', { name: 'Split editor mode' });
+    const markdownMode = page.getByRole('radio', { name: 'Markdown editor mode' });
+    await expect(textMode).toHaveAttribute('aria-checked', 'true');
+
+    await splitMode.click();
+    await expect(splitMode).toHaveAttribute('aria-checked', 'true');
+    await expect(content).toBeVisible();
+
+    const preview = page.getByRole('region', { name: 'Rendered markdown preview' });
+    await expect(preview.getByRole('heading', { name: 'Markdown Heading' })).toBeVisible();
+    await expect(preview.getByRole('listitem').filter({ hasText: 'one' })).toBeVisible();
+    await expect(preview.getByText('Bold line')).toBeVisible();
+
+    await content.fill(`${markdown}\n\nFresh preview text`);
+    await expect(preview).toContainText('Fresh preview text');
+
+    await markdownMode.click();
+    await expect(markdownMode).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByPlaceholder('Start writing your note...')).toHaveCount(0);
+    await expect(preview.getByRole('heading', { name: 'Markdown Heading' })).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'storm.dance' })).toBeVisible();
+    await expect(page.getByRole('radio', { name: 'Markdown editor mode' })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByRole('region', { name: 'Rendered markdown preview' })).toContainText('Fresh preview text');
+
+    await page.getByRole('radio', { name: 'Text editor mode' }).click();
+    await expect(page.getByPlaceholder('Start writing your note...')).toHaveValue(`${markdown}\n\nFresh preview text`);
+  });
+
   test('supports notebook and folder creation without breaking navigation', async ({ page }) => {
     await openApp(page);
 
