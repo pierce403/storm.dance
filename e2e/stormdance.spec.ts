@@ -58,6 +58,15 @@ async function expectStoredNote(page: Page, title: string, content: string) {
   );
 }
 
+async function expectTextareaReachesPageBottom(page: Page) {
+  const bottomGap = await page.getByPlaceholder('Start writing your note...').evaluate((textarea) => {
+    const rect = textarea.getBoundingClientRect();
+    return window.innerHeight - rect.bottom;
+  });
+
+  expect(bottomGap).toBeLessThanOrEqual(72);
+}
+
 test.describe('storm.dance notes', () => {
   test.beforeEach(async ({ context, page }) => {
     await context.clearCookies();
@@ -83,6 +92,7 @@ test.describe('storm.dance notes', () => {
     const noteButton = page.getByRole('button', { name: /^E2E Note$/ });
     await expect(noteButton).toBeVisible();
     await expect(content).toHaveValue('Line one\nLine two');
+    await expectTextareaReachesPageBottom(page);
     await expectStoredNote(page, 'E2E Note', 'Line one\nLine two');
 
     await page.reload();

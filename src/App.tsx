@@ -162,7 +162,6 @@ function App() {
   const {
     contacts: collaborationContacts,
     status: collaborationStatus,
-    sessionNotebookId,
     sessionTopic,
     error: collaborationError,
     addContact,
@@ -170,10 +169,6 @@ function App() {
     startCollaboration,
     stopCollaboration,
     broadcastLocalUpdate,
-    inviteModalOpen,
-    inviteDetails,
-    acceptInvite,
-    rejectInvite,
   } = useNotebookCollaboration({
     client: xmtpClient,
     userAddress: userAddress,
@@ -271,7 +266,11 @@ function App() {
         sidebarRef.current?.focusItem(activeNoteId ? 'note' : 'folder', activeNoteId);
       } else if (nextColumn === 'editor') {
         if (activeNote) {
-          editorTitleInputRef.current?.focus() || editorTextAreaRef.current?.focus();
+          if (editorTitleInputRef.current) {
+            editorTitleInputRef.current.focus();
+          } else {
+            editorTextAreaRef.current?.focus();
+          }
         } else {
           editorRef.current?.focus();
         }
@@ -306,7 +305,6 @@ function App() {
         console.error('Failed initialization:', error);
         setIsDbBlocked(true);
         showToast('Error', 'Failed to initialize database. Another tab might be blocking an update.', 'destructive');
-      } finally {
       }
     };
     loadInitialData();
@@ -763,7 +761,7 @@ function App() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-transparent text-gray-900 dark:text-gray-100 font-sans antialiased px-3 pb-4 lg:px-6">
+    <div className="flex min-h-screen flex-col bg-transparent text-gray-900 dark:text-gray-100 font-sans antialiased px-3 pb-4 lg:h-screen lg:overflow-hidden lg:px-6">
       <TopBar
         theme={theme}
         toggleTheme={toggleTheme}
@@ -783,8 +781,8 @@ function App() {
         setDebugLoggingEnabled={setDebugLoggingEnabled}
       />
 
-      <main className="flex-1 overflow-hidden pt-2">
-        <div className="flex h-full flex-col gap-3 lg:flex-row lg:gap-4">
+      <main className="min-h-0 flex-1 overflow-hidden pt-2">
+        <div className="flex h-full min-h-0 flex-col gap-3 lg:flex-row lg:gap-4">
           <div
             className="w-full lg:w-1/3 xl:w-1/4 min-h-[38vh] lg:min-h-0 lg:max-w-[360px] border border-gray-200/70 dark:border-gray-800/70 flex flex-col bg-white/80 dark:bg-gray-950/70 rounded-2xl backdrop-blur mobile-card"
             onFocusCapture={() => setActiveColumn('notebooks')}
@@ -832,7 +830,7 @@ function App() {
           </div>
 
           <div
-            className="flex-1 min-h-[50vh] lg:min-h-0 flex flex-col"
+            className="flex min-h-[50vh] flex-1 flex-col lg:min-h-0"
             ref={editorRef}
             tabIndex={0}
             onFocus={() => setActiveColumn('editor')}
@@ -842,7 +840,7 @@ function App() {
                 Loading...
               </div>
             ) : openNoteIds.length > 0 ? (
-              <div className="flex h-full flex-col rounded-2xl border border-gray-200/70 dark:border-gray-800/70 bg-white/80 dark:bg-gray-900/80 shadow-lg shadow-gray-900/5 dark:shadow-black/20 backdrop-blur mobile-card">
+              <div className="flex h-full min-h-0 flex-col rounded-2xl border border-gray-200/70 dark:border-gray-800/70 bg-white/80 dark:bg-gray-900/80 shadow-lg shadow-gray-900/5 dark:shadow-black/20 backdrop-blur mobile-card">
                 <EditorTabs
                   notes={notes}
                   openNoteIds={openNoteIds}
@@ -850,7 +848,7 @@ function App() {
                   onSelectTab={setActiveNoteId}
                   onCloseTab={handleCloseTab}
                 />
-                <div className="flex-1 overflow-auto scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 dark:scrollbar-thumb-gray-600 dark:hover:scrollbar-thumb-gray-500 p-4 lg:p-6">
+                <div className="min-h-0 flex-1 overflow-auto scrollbar-thin scrollbar-thumb-gray-300 hover:scrollbar-thumb-gray-400 dark:scrollbar-thumb-gray-600 dark:hover:scrollbar-thumb-gray-500 p-4 lg:p-6">
                   <Editor
                     note={activeNote}
                     onUpdateNote={handleUpdateNote}

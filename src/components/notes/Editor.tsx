@@ -42,7 +42,7 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
   }
 
   return (
-    <div className="p-4 h-full flex flex-col bg-white dark:bg-gray-950">
+    <div className="flex h-full min-h-0 flex-col bg-white p-4 dark:bg-gray-950">
       <input
         ref={titleInputRef}
         type="text"
@@ -56,7 +56,7 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
         value={note.content || ''}
         onChange={handleContentChange}
         placeholder="Start writing your note..."
-        className="flex-1 w-full p-2 bg-transparent focus:outline-none resize-none dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
+        className="min-h-0 flex-1 w-full resize-none bg-transparent p-2 focus:outline-none dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-500"
       />
     </div>
   );
