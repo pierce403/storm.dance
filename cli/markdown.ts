@@ -12,13 +12,16 @@ import {
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 
-export const MIRROR_SCHEMA = 1;
+export const MIRROR_SCHEMA = 2;
+const LEGACY_MIRROR_SCHEMA = 1;
 export const MIRROR_STATE_DIRECTORY = '.stormdance';
 export const MIRROR_MANIFEST_FILE = 'manifest.json';
 
 const METADATA_PREFIX = '<!-- stormdance:';
 const METADATA_SUFFIX = ' -->';
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
+const MAX_MANIFEST_BYTES = 1024 * 1024;
+const MAX_MARKDOWN_BYTES = 32 * 1024 * 1024;
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 
 export interface MirrorNote {
@@ -40,6 +43,7 @@ export interface MirrorManifestEntry {
 export interface MirrorManifest {
   schema: typeof MIRROR_SCHEMA;
   notes: Record<string, MirrorManifestEntry>;
+  folders: Record<string, string>;
 }
 
 export interface ParseMirrorNoteOptions {
@@ -64,6 +68,8 @@ export interface MaterializeMirrorOptions {
   acknowledgedUpsertNoteIds?: ReadonlySet<string>;
   /** Owned notes whose missing files were incorporated as deletion tombstones by this scan. */
   acknowledgedDeletionNoteIds?: ReadonlySet<string>;
+  /** Exact path/hash observations carried from scan through materialization. */
+  witnesses?: Readonly<Record<string, ScanWitness>>;
 }
 
 export interface ScanMirrorOptions {
@@ -76,10 +82,17 @@ export interface ScanMirrorResult {
   deletedNoteIds: string[];
   ignoredPaths: string[];
   preferredPaths: Record<string, string>;
+  witnesses: Record<string, ScanWitness>;
+}
+
+export interface ScanWitness {
+  path: string;
+  /** `null` means the manifest-owned path was observed absent. */
+  hash: string | null;
 }
 
 interface MirrorMetadata {
-  schema: typeof MIRROR_SCHEMA;
+  schema: number;
   notebookId: string;
   noteId: string;
   folderId: string | null;
@@ -87,7 +100,7 @@ interface MirrorMetadata {
   updatedAt: number;
 }
 
-const emptyManifest = (): MirrorManifest => ({ schema: MIRROR_SCHEMA, notes: {} });
+const emptyManifest = (): MirrorManifest => ({ schema: MIRROR_SCHEMA, notes: {}, folders: {} });
 
 const isErrno = (error: unknown, code: string): error is NodeJS.ErrnoException =>
   error instanceof Error && 'code' in error && error.code === code;
@@ -101,17 +114,44 @@ const isTimestamp = (value: unknown): value is number =>
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
 
-const isSafeFlatMarkdownPath = (relativePath: string): boolean => {
-  if (!relativePath || relativePath.startsWith('.') || path.isAbsolute(relativePath)) return false;
-  if (relativePath.includes('/') || relativePath.includes('\\') || relativePath.includes('\0')) return false;
-  if (path.basename(relativePath) !== relativePath || path.extname(relativePath) !== '.md') return false;
-  return relativePath !== '.' && relativePath !== '..';
+const WINDOWS_DEVICE_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+
+const isSafePathComponent = (component: string): boolean =>
+  component.length > 0
+  && component !== '.'
+  && component !== '..'
+  && !component.startsWith('.')
+  && !component.endsWith(' ')
+  && !component.endsWith('.')
+  && !Array.from(component).some((character) => (character.codePointAt(0) ?? 0) <= 0x1f)
+  && !/[<>:"|?*]/u.test(component)
+  && !WINDOWS_DEVICE_NAME.test(component);
+
+const pathComponents = (relativePath: string): string[] | null => {
+  if (!relativePath || relativePath.includes('\\') || relativePath.includes('\0') || path.isAbsolute(relativePath)) {
+    return null;
+  }
+  const components = relativePath.split('/');
+  return components.every(isSafePathComponent) ? components : null;
+};
+
+const isSafeRelativeDirectory = (relativePath: string): boolean =>
+  relativePath === '' || pathComponents(relativePath) !== null;
+
+const isSafeMarkdownPath = (relativePath: string): boolean => {
+  const components = pathComponents(relativePath);
+  if (!components) return false;
+  return path.posix.extname(components.at(-1) ?? '').toLowerCase() === '.md';
 };
 
 const resolveSafeMirrorPath = (root: string, relativePath: string): string | null => {
-  if (!isSafeFlatMarkdownPath(relativePath)) return null;
-  const resolved = path.resolve(root, relativePath);
-  return path.dirname(resolved) === root ? resolved : null;
+  const components = pathComponents(relativePath);
+  if (!components || !isSafeMarkdownPath(relativePath)) return null;
+  const resolved = path.resolve(root, ...components);
+  const relative = path.relative(root, resolved);
+  return relative && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative)
+    ? resolved
+    : null;
 };
 
 const validateMetadata = (value: unknown): MirrorMetadata => {
@@ -125,7 +165,9 @@ const validateMetadata = (value: unknown): MirrorMetadata => {
   if (actualKeys.length !== expectedKeys.length || actualKeys.some((key, index) => key !== expectedKeys[index])) {
     throw new Error('Invalid storm.dance metadata fields');
   }
-  if (metadata.schema !== MIRROR_SCHEMA) throw new Error('Unsupported storm.dance metadata schema');
+  if (metadata.schema !== LEGACY_MIRROR_SCHEMA && metadata.schema !== MIRROR_SCHEMA) {
+    throw new Error('Unsupported storm.dance metadata schema');
+  }
   if (!isNonEmptyString(metadata.notebookId) || !isNonEmptyString(metadata.noteId)) {
     throw new Error('Invalid storm.dance note identity');
   }
@@ -154,22 +196,44 @@ const parseMetadataLine = (line: string): MirrorMetadata => {
   return validateMetadata(JSON.parse(json));
 };
 
+interface LocatedMetadata {
+  metadata: MirrorMetadata;
+  start: number;
+  end: number;
+}
+
+/**
+ * Metadata lives before the first H1, but may follow user YAML frontmatter.
+ * Ignore marker-like text inside fenced code blocks so ordinary Markdown stays
+ * lossless and portable between the Node and Rust mirrors.
+ */
+const locateMetadata = (source: string): LocatedMetadata | null => {
+  let offset = 0;
+  let fence: '`' | '~' | null = null;
+  for (const line of source.match(/.*(?:\n|$)/g) ?? []) {
+    if (!line) continue;
+    const clean = line.replace(/[\r\n]+$/u, '');
+    const trimmed = clean.trimStart();
+    if (trimmed.startsWith('```')) fence = fence === '`' ? null : fence ?? '`';
+    else if (trimmed.startsWith('~~~')) fence = fence === '~' ? null : fence ?? '~';
+
+    if (fence === null && clean.startsWith('# ')) break;
+    if (fence === null && clean.startsWith(METADATA_PREFIX)) {
+      return {
+        metadata: parseMetadataLine(clean),
+        start: offset,
+        end: offset + line.length,
+      };
+    }
+    offset += line.length;
+    if (offset > 128 * 1024) break;
+  }
+  return null;
+};
+
 const normalizedTitle = (title: string): string => {
   const oneLine = title.replace(/[\r\n\0]+/g, ' ').trim();
   return oneLine || 'Untitled';
-};
-
-const parseCanonicalBody = (sourceAfterMetadata: string): { title: string; content: string } => {
-  const headingEnd = sourceAfterMetadata.indexOf('\n');
-  const headingLine = (headingEnd === -1 ? sourceAfterMetadata : sourceAfterMetadata.slice(0, headingEnd)).replace(/\r$/, '');
-  const headingMatch = /^#\s+(.+)$/.exec(headingLine);
-  if (!headingMatch) throw new Error('Storm.dance Markdown must contain an H1 immediately after metadata');
-
-  let content = headingEnd === -1 ? '' : sourceAfterMetadata.slice(headingEnd + 1);
-  if (content.startsWith('\r\n')) content = content.slice(2);
-  else if (content.startsWith('\n')) content = content.slice(1);
-
-  return { title: headingMatch[1], content };
 };
 
 const titleFromFileName = (fileName: string): string => {
@@ -178,22 +242,77 @@ const titleFromFileName = (fileName: string): string => {
   return normalizedTitle(withoutStableSuffix.replace(/[-_]+/g, ' '));
 };
 
-const parseUserMarkdown = (source: string, fileName: string): { title: string; content: string } => {
-  const heading = /(^|\n)#\s+([^\r\n]+)(?:\r?\n|$)/.exec(source);
-  if (!heading || heading.index === undefined) {
+interface MarkdownHeading {
+  start: number;
+  end: number;
+  title: string;
+}
+
+const findUserTitleHeading = (source: string): MarkdownHeading | null => {
+  const lines = source.match(/.*(?:\r?\n|$)/g)?.filter(Boolean) ?? [];
+  let offset = 0;
+  let inFrontmatter = lines[0]?.replace(/[\r\n]+$/u, '') === '---';
+  let fence: { marker: '`' | '~'; length: number } | null = null;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const clean = line.replace(/[\r\n]+$/u, '');
+    if (inFrontmatter) {
+      offset += line.length;
+      if (index > 0 && (clean === '---' || clean === '...')) inFrontmatter = false;
+      continue;
+    }
+
+    const fenceMatch = /^ {0,3}(`{3,}|~{3,})/u.exec(clean);
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0] as '`' | '~';
+      if (!fence) fence = { marker, length: fenceMatch[1].length };
+      else if (fence.marker === marker && fenceMatch[1].length >= fence.length) fence = null;
+      offset += line.length;
+      continue;
+    }
+
+    if (!fence && clean.startsWith('# ')) {
+      return {
+        start: offset,
+        end: offset + line.length,
+        title: clean.slice(2),
+      };
+    }
+    offset += line.length;
+  }
+  return null;
+};
+
+const parseUserMarkdown = (source: string, fileName = 'Untitled.md'): { title: string; content: string } => {
+  const heading = findUserTitleHeading(source);
+  if (!heading) {
     return { title: titleFromFileName(fileName), content: source };
   }
 
-  const headingStart = heading.index + heading[1].length;
-  const headingEnd = heading.index + heading[0].length;
-  let suffix = source.slice(headingEnd);
+  let suffix = source.slice(heading.end);
   if (suffix.startsWith('\r\n')) suffix = suffix.slice(2);
   else if (suffix.startsWith('\n')) suffix = suffix.slice(1);
 
   return {
-    title: normalizedTitle(heading[2]),
-    content: `${source.slice(0, headingStart)}${suffix}`,
+    title: normalizedTitle(heading.title),
+    content: `${source.slice(0, heading.start)}${suffix}`,
   };
+};
+
+const splitFrontmatter = (content: string): { frontmatter: string; rest: string } | null => {
+  if (!content.startsWith('---\n') && !content.startsWith('---\r\n')) return null;
+  let offset = 0;
+  const lines = content.match(/.*(?:\n|$)/g) ?? [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line) continue;
+    offset += line.length;
+    if (index > 0 && ['---', '...'].includes(line.replace(/[\r\n]+$/u, ''))) {
+      return { frontmatter: content.slice(0, offset), rest: content.slice(offset) };
+    }
+  }
+  return null;
 };
 
 export function serializeMirrorNote(note: MirrorNote): string {
@@ -207,20 +326,26 @@ export function serializeMirrorNote(note: MirrorNote): string {
     updatedAt: note.updatedAt,
   };
   const safeMetadataJson = JSON.stringify(metadata).replace(/-->/g, '--\\u003e');
-  return `${METADATA_PREFIX}${safeMetadataJson}${METADATA_SUFFIX}\n# ${normalizedTitle(note.title)}\n\n${note.content}`;
+  const marker = `${METADATA_PREFIX}${safeMetadataJson}${METADATA_SUFFIX}\n`;
+  const frontmatter = splitFrontmatter(note.content);
+  if (frontmatter) {
+    return `${frontmatter.frontmatter}${marker}# ${normalizedTitle(note.title)}\n\n${frontmatter.rest.replace(/^[\r\n]+/u, '')}`;
+  }
+  return `${marker}# ${normalizedTitle(note.title)}\n\n${note.content}`;
 }
 
 export function parseMirrorNote(source: string, options: ParseMirrorNoteOptions = {}): MirrorNote {
-  const firstLineEnd = source.indexOf('\n');
-  const firstLine = (firstLineEnd === -1 ? source : source.slice(0, firstLineEnd)).replace(/\r$/, '');
-
-  if (firstLine.startsWith(METADATA_PREFIX)) {
-    const metadata = parseMetadataLine(firstLine);
-    const parsed = parseCanonicalBody(firstLineEnd === -1 ? '' : source.slice(firstLineEnd + 1));
+  const located = locateMetadata(source);
+  if (located) {
+    const { metadata } = located;
+    const withoutMetadata = `${source.slice(0, located.start)}${source.slice(located.end)}`;
+    const parsed = parseUserMarkdown(withoutMetadata, options.fileName);
+    const parent = options.fileName ? path.posix.dirname(options.fileName) : '.';
+    const inferredFolder = parent !== '.' ? `obsidian:path:${parent}` : null;
     return {
       id: metadata.noteId,
       notebookId: metadata.notebookId,
-      folderId: metadata.folderId,
+      folderId: metadata.folderId ?? inferredFolder,
       title: parsed.title,
       content: parsed.content,
       createdAt: metadata.createdAt,
@@ -234,10 +359,11 @@ export function parseMirrorNote(source: string, options: ParseMirrorNoteOptions 
 
   const parsed = parseUserMarkdown(source, options.fileName);
   const timestamp = options.updatedAt ?? Date.now();
+  const parent = path.posix.dirname(options.fileName);
   return {
     id: options.noteId ?? randomUUID(),
     notebookId: options.notebookId,
-    folderId: null,
+    folderId: parent === '.' ? null : `obsidian:path:${parent}`,
     title: parsed.title,
     content: parsed.content,
     createdAt: options.createdAt ?? timestamp,
@@ -277,7 +403,10 @@ const safeLstat = async (filePath: string) => {
   }
 };
 
-const readRegularFile = async (filePath: string): Promise<Buffer | null> => {
+const readRegularFile = async (
+  filePath: string,
+  maximumBytes = MAX_MARKDOWN_BYTES,
+): Promise<Buffer | null> => {
   let handle;
   try {
     handle = await open(filePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
@@ -289,7 +418,10 @@ const readRegularFile = async (filePath: string): Promise<Buffer | null> => {
   try {
     const stat = await handle.stat();
     if (!stat.isFile()) return null;
-    return await handle.readFile();
+    if (stat.size > maximumBytes) throw new Error('A storm.dance mirror file is too large');
+    const bytes = await handle.readFile();
+    if (bytes.byteLength > maximumBytes) throw new Error('A storm.dance mirror file is too large');
+    return bytes;
   } finally {
     await handle.close();
   }
@@ -333,7 +465,12 @@ const parseManifest = (source: string): MirrorManifest => {
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return emptyManifest();
   const object = raw as Record<string, unknown>;
-  if (object.schema !== MIRROR_SCHEMA || !object.notes || typeof object.notes !== 'object' || Array.isArray(object.notes)) {
+  if (
+    (object.schema !== LEGACY_MIRROR_SCHEMA && object.schema !== MIRROR_SCHEMA)
+    || !object.notes
+    || typeof object.notes !== 'object'
+    || Array.isArray(object.notes)
+  ) {
     return emptyManifest();
   }
 
@@ -343,11 +480,19 @@ const parseManifest = (source: string): MirrorManifest => {
     if (!isNonEmptyString(noteId) || !entryValue || typeof entryValue !== 'object' || Array.isArray(entryValue)) continue;
     const entry = entryValue as Record<string, unknown>;
     if (typeof entry.path !== 'string' || typeof entry.hash !== 'string') continue;
-    if (!isSafeFlatMarkdownPath(entry.path) || !HASH_PATTERN.test(entry.hash) || claimedPaths.has(entry.path)) continue;
+    if (!isSafeMarkdownPath(entry.path) || !HASH_PATTERN.test(entry.hash) || claimedPaths.has(entry.path)) continue;
     notes[noteId] = { path: entry.path, hash: entry.hash };
     claimedPaths.add(entry.path);
   }
-  return { schema: MIRROR_SCHEMA, notes };
+  const folders: Record<string, string> = {};
+  if (object.folders && typeof object.folders === 'object' && !Array.isArray(object.folders)) {
+    for (const [folderId, folderPath] of Object.entries(object.folders as Record<string, unknown>)) {
+      if (isNonEmptyString(folderId) && typeof folderPath === 'string' && isSafeRelativeDirectory(folderPath)) {
+        folders[folderId] = folderPath;
+      }
+    }
+  }
+  return { schema: MIRROR_SCHEMA, notes, folders };
 };
 
 export async function readMirrorManifest(rootDirectory: string): Promise<MirrorManifest> {
@@ -363,7 +508,7 @@ export async function readMirrorManifest(rootDirectory: string): Promise<MirrorM
   if (!manifestStat || manifestStat.isSymbolicLink() || !manifestStat.isFile()) return emptyManifest();
 
   try {
-    const bytes = await readRegularFile(file);
+    const bytes = await readRegularFile(file, MAX_MANIFEST_BYTES);
     return bytes ? parseManifest(utf8Decoder.decode(bytes)) : emptyManifest();
   } catch {
     return emptyManifest();
@@ -373,6 +518,7 @@ export async function readMirrorManifest(rootDirectory: string): Promise<MirrorM
 const orderedManifest = (manifest: MirrorManifest): MirrorManifest => ({
   schema: MIRROR_SCHEMA,
   notes: Object.fromEntries(Object.entries(manifest.notes).sort(([left], [right]) => left.localeCompare(right))),
+  folders: Object.fromEntries(Object.entries(manifest.folders).sort(([left], [right]) => left.localeCompare(right))),
 });
 
 const atomicWriteUtf8 = async (destination: string, content: string, mode: number): Promise<void> => {
@@ -393,6 +539,52 @@ const atomicWriteUtf8 = async (destination: string, content: string, mode: numbe
   }
 };
 
+const ensureSafeParent = async (root: string, relativePath: string): Promise<void> => {
+  const components = pathComponents(relativePath);
+  if (!components || !isSafeMarkdownPath(relativePath)) {
+    throw new Error(`Unsafe mirror path: ${relativePath}`);
+  }
+  let current = root;
+  for (const component of components.slice(0, -1)) {
+    current = path.join(current, component);
+    const existing = await safeLstat(current);
+    if (existing) {
+      if (existing.isSymbolicLink() || !existing.isDirectory()) {
+        throw new Error(`Unsafe mirror parent: ${relativePath}`);
+      }
+    } else {
+      await mkdir(current);
+    }
+  }
+  const canonicalParent = await realpath(path.dirname(path.join(root, ...components)));
+  const relativeParent = path.relative(root, canonicalParent);
+  if (relativeParent === '..' || relativeParent.startsWith(`..${path.sep}`) || path.isAbsolute(relativeParent)) {
+    throw new Error(`Unsafe mirror parent: ${relativePath}`);
+  }
+};
+
+const validateExistingParent = async (root: string, relativePath: string): Promise<boolean> => {
+  const components = pathComponents(relativePath);
+  if (!components || !isSafeMarkdownPath(relativePath)) {
+    throw new Error(`Unsafe mirror path: ${relativePath}`);
+  }
+  let current = root;
+  for (const component of components.slice(0, -1)) {
+    current = path.join(current, component);
+    const existing = await safeLstat(current);
+    if (!existing) return false;
+    if (existing.isSymbolicLink() || !existing.isDirectory()) {
+      throw new Error(`Unsafe mirror parent: ${relativePath}`);
+    }
+  }
+  const canonicalParent = await realpath(path.dirname(path.join(root, ...components)));
+  const relativeParent = path.relative(root, canonicalParent);
+  if (relativeParent === '..' || relativeParent.startsWith(`..${path.sep}`) || path.isAbsolute(relativeParent)) {
+    throw new Error(`Unsafe mirror parent: ${relativePath}`);
+  }
+  return true;
+};
+
 const regularFileHash = async (filePath: string): Promise<string | null> => {
   const stat = await safeLstat(filePath);
   if (!stat || stat.isSymbolicLink() || !stat.isFile()) return null;
@@ -400,9 +592,25 @@ const regularFileHash = async (filePath: string): Promise<string | null> => {
   return bytes ? sha256(bytes) : null;
 };
 
+const witnessMatches = async (
+  root: string,
+  witness: ScanWitness,
+): Promise<boolean> => {
+  const filePath = resolveSafeMirrorPath(root, witness.path);
+  if (!filePath) return false;
+  try {
+    const parentExists = await validateExistingParent(root, witness.path);
+    if (!parentExists) return witness.hash === null;
+    return await regularFileHash(filePath) === witness.hash;
+  } catch {
+    return false;
+  }
+};
+
 const removeOwnedFile = async (root: string, relativePath: string): Promise<boolean> => {
   const filePath = resolveSafeMirrorPath(root, relativePath);
   if (!filePath) return false;
+  if (!await validateExistingParent(root, relativePath)) return false;
   const stat = await safeLstat(filePath);
   if (!stat || stat.isSymbolicLink() || !stat.isFile()) return false;
   await unlink(filePath);
@@ -412,10 +620,14 @@ const removeOwnedFile = async (root: string, relativePath: string): Promise<bool
 const allocatePath = async (
   root: string,
   note: MirrorNote,
+  manifest: MirrorManifest,
   owners: Map<string, string>,
 ): Promise<string> => {
+  const directory = note.folderId ? manifest.folders[note.folderId] ?? '' : '';
+  if (!isSafeRelativeDirectory(directory)) throw new Error(`Unsafe mirror directory: ${directory}`);
   for (let attempt = 1; attempt < 10_000; attempt += 1) {
-    const candidate = candidateFileName(note, attempt);
+    const fileName = candidateFileName(note, attempt);
+    const candidate = directory ? `${directory}/${fileName}` : fileName;
     const owner = owners.get(candidate);
     if (owner && owner !== note.id) continue;
 
@@ -447,9 +659,23 @@ export async function materializeMirror(
   for (const note of notes.filter((candidate) => candidate.deleted).sort((left, right) => left.id.localeCompare(right.id))) {
     const entry = manifest.notes[note.id];
     if (!entry) continue;
-    const diskHash = await regularFileHash(path.join(root, entry.path));
+    const witness = options.witnesses?.[note.id];
+    const witnessedDeletion = witness?.path === entry.path
+      && witness.hash === null
+      && await witnessMatches(root, witness);
+    const ownedPath = resolveSafeMirrorPath(root, entry.path);
+    let diskHash: string | null;
+    try {
+      diskHash = ownedPath && await validateExistingParent(root, entry.path)
+        ? await regularFileHash(ownedPath)
+        : null;
+    } catch {
+      protectedPaths.add(entry.path);
+      continue;
+    }
     if (
       diskHash !== entry.hash
+      && !witnessedDeletion
       && !options.acknowledgedDeletionNoteIds?.has(note.id)
     ) {
       protectedPaths.add(entry.path);
@@ -463,16 +689,32 @@ export async function materializeMirror(
   for (const note of notes.filter((candidate) => !candidate.deleted).sort((left, right) => left.id.localeCompare(right.id))) {
     if (!note.id || !note.notebookId) throw new Error('Mirror notes require stable note and notebook IDs');
     const previous = manifest.notes[note.id];
+    const witness = options.witnesses?.[note.id];
+    const currentWitness = witness && await witnessMatches(root, witness) ? witness : undefined;
     if (previous && !options.acknowledgedUpsertNoteIds?.has(note.id)) {
-      const previousDiskHash = await regularFileHash(path.join(root, previous.path));
-      if (previousDiskHash !== previous.hash) {
+      const previousPath = resolveSafeMirrorPath(root, previous.path);
+      let previousDiskHash: string | null;
+      try {
+        previousDiskHash = previousPath && await validateExistingParent(root, previous.path)
+          ? await regularFileHash(previousPath)
+          : null;
+      } catch {
+        protectedPaths.add(previous.path);
+        continue;
+      }
+      const witnessedPrevious = currentWitness !== undefined
+        && (
+          (currentWitness.path === previous.path && currentWitness.hash === previousDiskHash)
+          || (currentWitness.path !== previous.path && previousDiskHash === null)
+        );
+      if (previousDiskHash !== previous.hash && !witnessedPrevious) {
         protectedPaths.add(previous.path);
         continue;
       }
     }
     const preferredPath = options.preferredPaths?.[note.id];
     let relativePath: string | undefined;
-    if (preferredPath && isSafeFlatMarkdownPath(preferredPath)) {
+    if (preferredPath && isSafeMarkdownPath(preferredPath)) {
       const preferredOwner = owners.get(preferredPath);
       const preferredDestination = resolveSafeMirrorPath(root, preferredPath);
       const preferredStat = preferredDestination ? await safeLstat(preferredDestination) : null;
@@ -480,15 +722,24 @@ export async function materializeMirror(
         (!preferredOwner || preferredOwner === note.id)
         && preferredStat?.isFile()
         && !preferredStat.isSymbolicLink()
+        && (
+          options.witnesses === undefined
+          || (currentWitness?.path === preferredPath && currentWitness.hash !== null)
+        )
       ) {
         relativePath = preferredPath;
       }
     }
-    relativePath ??= await allocatePath(root, note, owners);
+    relativePath ??= previous?.path;
+    relativePath ??= await allocatePath(root, note, manifest, owners);
     const destination = resolveSafeMirrorPath(root, relativePath);
     if (!destination) throw new Error(`Unsafe mirror path: ${relativePath}`);
+    await ensureSafeParent(root, relativePath);
 
     const serialized = serializeMirrorNote(note);
+    if (Buffer.byteLength(serialized, 'utf8') > MAX_MARKDOWN_BYTES) {
+      throw new Error(`Markdown note ${note.id} exceeds the mirror size limit`);
+    }
     const hash = sha256(serialized);
     const diskHash = await regularFileHash(destination);
     if (diskHash !== hash) {
@@ -501,6 +752,10 @@ export async function materializeMirror(
       owners.delete(previous.path);
     }
     owners.set(relativePath, note.id);
+    if (note.folderId) {
+      const parent = path.posix.dirname(relativePath);
+      manifest.folders[note.folderId] = parent === '.' ? '' : parent;
+    }
     manifest.notes[note.id] = { path: relativePath, hash };
   }
 
@@ -511,7 +766,7 @@ export async function materializeMirror(
   const existingManifestStat = await safeLstat(manifestDestination);
   if (existingManifestStat?.isSymbolicLink()) throw new Error('Refusing to replace a symlinked mirror manifest');
   if (existingManifestStat?.isFile()) {
-    const bytes = await readRegularFile(manifestDestination);
+    const bytes = await readRegularFile(manifestDestination, MAX_MANIFEST_BYTES);
     if (bytes) existingManifest = utf8Decoder.decode(bytes);
   }
   if (existingManifest !== manifestJson) await atomicWriteUtf8(manifestDestination, manifestJson, 0o600);
@@ -524,43 +779,93 @@ export async function materializeMirror(
   };
 }
 
+interface MarkdownWalk {
+  paths: string[];
+  ignoredPaths: string[];
+}
+
+const collectMarkdownPaths = async (root: string): Promise<MarkdownWalk> => {
+  const paths: string[] = [];
+  const ignoredPaths: string[] = [];
+
+  const visit = async (directory: string, prefix: string): Promise<void> => {
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      if (prefix) ignoredPaths.push(prefix);
+      return;
+    }
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.name.startsWith('.')) continue;
+      if (entry.isSymbolicLink()) {
+        ignoredPaths.push(relativePath);
+        continue;
+      }
+      if (entry.isDirectory()) {
+        if (isSafeRelativeDirectory(relativePath)) {
+          await visit(path.join(directory, entry.name), relativePath);
+        } else {
+          ignoredPaths.push(relativePath);
+        }
+        continue;
+      }
+      if (path.posix.extname(relativePath).toLowerCase() !== '.md') continue;
+      if (entry.isFile() && isSafeMarkdownPath(relativePath)) paths.push(relativePath);
+      else ignoredPaths.push(relativePath);
+    }
+  };
+
+  await visit(root, '');
+  return { paths: paths.sort(), ignoredPaths: ignoredPaths.sort() };
+};
+
 export async function scanMirror(
   rootDirectory: string,
   notebookId: string,
   options: ScanMirrorOptions = {},
 ): Promise<ScanMirrorResult> {
   const root = await existingRoot(rootDirectory);
-  if (!root) return { upserts: [], deletedNoteIds: [], ignoredPaths: [], preferredPaths: {} };
+  if (!root) return {
+    upserts: [],
+    deletedNoteIds: [],
+    ignoredPaths: [],
+    preferredPaths: {},
+    witnesses: {},
+  };
 
   const manifest = await readMirrorManifest(root);
   const ownerByPath = new Map(Object.entries(manifest.notes).map(([noteId, entry]) => [entry.path, noteId]));
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? Date.now;
   const upserts: MirrorNote[] = [];
-  const ignoredPaths: string[] = [];
+  const walk = await collectMarkdownPaths(root);
+  const ignoredPaths = [...walk.ignoredPaths];
   const preferredPaths: Record<string, string> = {};
+  const witnesses: Record<string, ScanWitness> = {};
   const presentManifestPaths = new Set<string>();
   const seenNoteIds = new Set<string>();
 
-  const entries = await readdir(root, { withFileTypes: true });
-  const entryNames = new Set(entries.map((entry) => entry.name));
-  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-    if (entry.name.startsWith('.') || path.extname(entry.name) !== '.md') continue;
-    const ownerId = ownerByPath.get(entry.name);
-    if (ownerId) presentManifestPaths.add(entry.name);
-    if (!entry.isFile() || entry.isSymbolicLink() || !isSafeFlatMarkdownPath(entry.name)) {
-      ignoredPaths.push(entry.name);
-      continue;
+  const presentPaths = new Set(walk.paths);
+  for (const ignoredPath of walk.ignoredPaths) {
+    for (const manifestPath of ownerByPath.keys()) {
+      if (manifestPath === ignoredPath || manifestPath.startsWith(`${ignoredPath}/`)) {
+        presentManifestPaths.add(manifestPath);
+      }
     }
-
-    const filePath = resolveSafeMirrorPath(root, entry.name);
+  }
+  for (const relativePath of walk.paths) {
+    const ownerId = ownerByPath.get(relativePath);
+    if (ownerId) presentManifestPaths.add(relativePath);
+    const filePath = resolveSafeMirrorPath(root, relativePath);
     if (!filePath) {
-      ignoredPaths.push(entry.name);
+      ignoredPaths.push(relativePath);
       continue;
     }
     const stat = await safeLstat(filePath);
     if (!stat || stat.isSymbolicLink() || !stat.isFile()) {
-      ignoredPaths.push(entry.name);
+      ignoredPaths.push(relativePath);
       continue;
     }
 
@@ -569,13 +874,13 @@ export async function scanMirror(
     try {
       const safeBytes = await readRegularFile(filePath);
       if (!safeBytes) {
-        ignoredPaths.push(entry.name);
+        ignoredPaths.push(relativePath);
         continue;
       }
       bytes = safeBytes;
       source = utf8Decoder.decode(bytes);
     } catch {
-      ignoredPaths.push(entry.name);
+      ignoredPaths.push(relativePath);
       continue;
     }
     const hash = sha256(bytes);
@@ -592,36 +897,37 @@ export async function scanMirror(
       parsed = parseMirrorNote(source, {
         notebookId,
         noteId: ownerId ?? createId(),
-        fileName: entry.name,
+        fileName: relativePath,
         createdAt: stat.birthtimeMs || stat.mtimeMs || now(),
         updatedAt: stat.mtimeMs || now(),
       });
     } catch {
-      ignoredPaths.push(entry.name);
+      ignoredPaths.push(relativePath);
       continue;
     }
     if (parsed.notebookId !== notebookId) {
-      ignoredPaths.push(entry.name);
+      ignoredPaths.push(relativePath);
       continue;
     }
 
     const previous = manifest.notes[parsed.id];
-    if (!ownerId && previous && entryNames.has(previous.path)) {
+    if (!ownerId && previous && presentPaths.has(previous.path)) {
       // A copied canonical file must not steal an existing note merely because
       // its filename sorts before the manifest-owned path. Manual renames are
       // still adopted when the previous path is actually absent.
-      ignoredPaths.push(entry.name);
+      ignoredPaths.push(relativePath);
       continue;
     }
     if (seenNoteIds.has(parsed.id)) {
-      ignoredPaths.push(entry.name);
+      ignoredPaths.push(relativePath);
       continue;
     }
 
     seenNoteIds.add(parsed.id);
-    if (previous?.path === entry.name && previous.hash === hash) continue;
-    if (!ownerId) preferredPaths[parsed.id] = entry.name;
+    if (previous?.path === relativePath && previous.hash === hash) continue;
+    if (!ownerId) preferredPaths[parsed.id] = relativePath;
     if (previous) parsed.updatedAt = Math.max(parsed.updatedAt + 1, now());
+    witnesses[parsed.id] = { path: relativePath, hash };
     upserts.push(parsed);
   }
 
@@ -629,11 +935,59 @@ export async function scanMirror(
     .filter(([noteId, entry]) => !seenNoteIds.has(noteId) && !presentManifestPaths.has(entry.path))
     .map(([noteId]) => noteId)
     .sort();
+  for (const noteId of deletedNoteIds) {
+    witnesses[noteId] = { path: manifest.notes[noteId].path, hash: null };
+  }
 
   return {
     upserts: upserts.sort((left, right) => left.id.localeCompare(right.id)),
     deletedNoteIds,
     ignoredPaths: ignoredPaths.sort(),
     preferredPaths: Object.fromEntries(Object.entries(preferredPaths).sort(([left], [right]) => left.localeCompare(right))),
+    witnesses: Object.fromEntries(Object.entries(witnesses).sort(([left], [right]) => left.localeCompare(right))),
+  };
+}
+
+/**
+ * Recheck scan observations immediately before mutating the CRDT. A stale
+ * observation is left on disk for the next watch cycle instead of being sent
+ * as if it were the editor's latest save.
+ */
+export async function revalidateScanMirror(
+  rootDirectory: string,
+  scanned: ScanMirrorResult,
+): Promise<ScanMirrorResult> {
+  const root = await existingRoot(rootDirectory);
+  if (!root) {
+    return {
+      upserts: [],
+      deletedNoteIds: [],
+      ignoredPaths: Array.from(new Set([
+        ...scanned.ignoredPaths,
+        ...Object.values(scanned.witnesses).map((witness) => witness.path),
+      ])).sort(),
+      preferredPaths: {},
+      witnesses: {},
+    };
+  }
+
+  const validIds = new Set<string>();
+  for (const [noteId, witness] of Object.entries(scanned.witnesses)) {
+    if (await witnessMatches(root, witness)) validIds.add(noteId);
+  }
+  const stalePaths = Object.entries(scanned.witnesses)
+    .filter(([noteId]) => !validIds.has(noteId))
+    .map(([, witness]) => witness.path);
+
+  return {
+    upserts: scanned.upserts.filter((note) => validIds.has(note.id)),
+    deletedNoteIds: scanned.deletedNoteIds.filter((noteId) => validIds.has(noteId)),
+    ignoredPaths: Array.from(new Set([...scanned.ignoredPaths, ...stalePaths])).sort(),
+    preferredPaths: Object.fromEntries(
+      Object.entries(scanned.preferredPaths).filter(([noteId]) => validIds.has(noteId)),
+    ),
+    witnesses: Object.fromEntries(
+      Object.entries(scanned.witnesses).filter(([noteId]) => validIds.has(noteId)),
+    ),
   };
 }

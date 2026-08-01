@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -206,10 +206,28 @@ describe('link config persistence', () => {
     await expect(writeLinkConfig(root, config({ env: 'production' }))).rejects.toThrow(
       'already linked',
     );
+
+    const legacyRoot = await makeTemporaryDirectory();
+    await mkdir(path.join(legacyRoot, '.stormdance'));
+    await writeFile(
+      path.join(legacyRoot, '.stormdance', 'config.json'),
+      `${JSON.stringify({ ...config(), schema: 1 })}\n`,
+      'utf8',
+    );
+    expect(await readLinkConfig(legacyRoot)).toEqual(config());
   });
 });
 
 describe('directory sync', () => {
+  it('fails closed when a copied vault is opened by the wrong XMTP inbox', () => {
+    expect(() => new NotebookDirectorySync({
+      rootDirectory: '/unused',
+      config: config({ expectedInboxId: 'expected-inbox' }),
+      group: new FakeGroup(),
+      inboxId: 'different-inbox',
+    })).toThrow('expects XMTP inbox expected-inbox');
+  });
+
   it('replays XMTP history, materializes Markdown, persists Yjs, and requests a delta', async () => {
     const root = await makeTemporaryDirectory();
     await writeLinkConfig(root, config());

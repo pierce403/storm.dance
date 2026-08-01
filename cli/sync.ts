@@ -24,6 +24,7 @@ import {
 } from '../src/lib/collaboration/protocol.js';
 import {
   materializeMirror,
+  revalidateScanMirror,
   scanMirror,
   type MaterializeMirrorOptions,
   type MirrorNote,
@@ -35,7 +36,8 @@ import type {
 } from './xmtp.js';
 
 export const STORMDANCE_GROUP_DESCRIPTION_PREFIX = 'storm.dance/yjs/1/';
-export const LINK_CONFIG_SCHEMA = 1;
+export const LINK_CONFIG_SCHEMA = 2;
+const LEGACY_LINK_CONFIG_SCHEMA = 1;
 export const UPDATE_BATCH_MS = 250;
 export const DEFAULT_HANDSHAKE_WAIT_MS = 1_500;
 export const SYNC_HISTORY_LIMIT = 2_048;
@@ -46,6 +48,7 @@ const STATE_DIRECTORY = '.stormdance';
 const CONFIG_FILENAME = 'config.json';
 const STATE_FILENAME = 'state.bin';
 const MAX_CONFIG_BYTES = 64 * 1024;
+const MAX_CRDT_STATE_BYTES = 64 * 1024 * 1024;
 
 export type LinkEnvironment = 'dev' | 'production';
 
@@ -56,6 +59,7 @@ export interface LinkConfig {
   notebookName: string;
   profile: string;
   env: LinkEnvironment;
+  expectedInboxId?: string;
 }
 
 export interface DiscoveredNotebook {
@@ -201,7 +205,11 @@ async function readRegularFile(filePath: string, maximumBytes?: number): Promise
     if (maximumBytes !== undefined && stat.size > maximumBytes) {
       throw new Error('A storm.dance state file is too large.');
     }
-    return await handle.readFile();
+    const bytes = await handle.readFile();
+    if (maximumBytes !== undefined && bytes.byteLength > maximumBytes) {
+      throw new Error('A storm.dance state file is too large.');
+    }
+    return bytes;
   } finally {
     await handle.close();
   }
@@ -240,7 +248,7 @@ function validateLinkConfig(value: unknown): LinkConfig {
     throw new Error('Invalid storm.dance link config.');
   }
   const config = value as Record<string, unknown>;
-  const expectedKeys = [
+  const requiredKeys = [
     'conversationId',
     'env',
     'notebookId',
@@ -250,12 +258,12 @@ function validateLinkConfig(value: unknown): LinkConfig {
   ];
   const actualKeys = Object.keys(config).sort();
   if (
-    actualKeys.length !== expectedKeys.length
-    || actualKeys.some((key, index) => key !== expectedKeys[index])
+    requiredKeys.some((key) => !actualKeys.includes(key))
+    || actualKeys.some((key) => !requiredKeys.includes(key) && key !== 'expectedInboxId')
   ) {
     throw new Error('Invalid storm.dance link config fields.');
   }
-  if (config.schema !== LINK_CONFIG_SCHEMA) {
+  if (config.schema !== LEGACY_LINK_CONFIG_SCHEMA && config.schema !== LINK_CONFIG_SCHEMA) {
     throw new Error('Unsupported storm.dance link config schema.');
   }
   if (
@@ -269,6 +277,9 @@ function validateLinkConfig(value: unknown): LinkConfig {
   if (config.env !== 'dev' && config.env !== 'production') {
     throw new Error('Storm.dance link config contains an invalid XMTP environment.');
   }
+  if (config.expectedInboxId !== undefined && !isNonEmptyString(config.expectedInboxId)) {
+    throw new Error('Storm.dance link config contains an invalid expected inbox ID.');
+  }
   return {
     schema: LINK_CONFIG_SCHEMA,
     notebookId: config.notebookId,
@@ -276,6 +287,9 @@ function validateLinkConfig(value: unknown): LinkConfig {
     notebookName: config.notebookName,
     profile: config.profile,
     env: config.env,
+    ...(typeof config.expectedInboxId === 'string'
+      ? { expectedInboxId: config.expectedInboxId }
+      : {}),
   };
 }
 
@@ -326,7 +340,7 @@ export async function writeLinkConfig(
 
 export async function readCrdtState(rootDirectory: string): Promise<Uint8Array | undefined> {
   const root = await resolveRoot(rootDirectory, false);
-  const bytes = await readRegularFile(statePath(root));
+  const bytes = await readRegularFile(statePath(root), MAX_CRDT_STATE_BYTES);
   return bytes ? new Uint8Array(bytes) : undefined;
 }
 
@@ -419,6 +433,11 @@ export class NotebookDirectorySync {
     this.config = validateLinkConfig(options.config);
     this.group = options.group;
     if (!isNonEmptyString(options.inboxId)) throw new Error('XMTP inbox ID is unavailable.');
+    if (this.config.expectedInboxId && this.config.expectedInboxId !== options.inboxId) {
+      throw new Error(
+        `Linked directory expects XMTP inbox ${this.config.expectedInboxId}, but the active profile resolves to ${options.inboxId}.`,
+      );
+    }
     this.inboxId = options.inboxId;
     this.warn = options.onWarning ?? (() => undefined);
     this.crdt = new NotebookCrdt(this.config.notebookId);
@@ -450,7 +469,7 @@ export class NotebookDirectorySync {
     try {
       this.root = await resolveRoot(this.requestedRoot, true);
       await ensureStateDirectory(this.root);
-      const state = await readRegularFile(statePath(this.root));
+      const state = await readRegularFile(statePath(this.root), MAX_CRDT_STATE_BYTES);
       if (state?.byteLength) this.crdt.applyUpdate(new Uint8Array(state));
 
       // Open the stream before replaying local history; queued duplicate Yjs
@@ -528,7 +547,10 @@ export class NotebookDirectorySync {
   scanNow(): Promise<void> {
     return this.enqueueOperation(async () => {
       if (!this.root) return;
-      const scanned = await scanMirror(this.root, this.config.notebookId);
+      const scanned = await revalidateScanMirror(
+        this.root,
+        await scanMirror(this.root, this.config.notebookId),
+      );
       for (const note of scanned.upserts) this.crdt.upsertNote(asCrdtNote(note));
       const deletedAt = Date.now();
       for (const noteId of scanned.deletedNoteIds) this.crdt.deleteNote(noteId, deletedAt);
@@ -537,8 +559,7 @@ export class NotebookDirectorySync {
       }
       await this.materializeAndPersist({
         preferredPaths: scanned.preferredPaths,
-        acknowledgedUpsertNoteIds: new Set(scanned.upserts.map((note) => note.id)),
-        acknowledgedDeletionNoteIds: new Set(scanned.deletedNoteIds),
+        witnesses: scanned.witnesses,
       });
     });
   }
@@ -600,10 +621,12 @@ export class NotebookDirectorySync {
   }
 
   private startWatcher(): void {
-    this.watcher = watch(this.root, { persistent: true }, (_eventType, fileName) => {
+    this.watcher = watch(this.root, { persistent: true, recursive: true }, (_eventType, fileName) => {
       if (fileName !== null) {
-        const value = fileName.toString();
-        if (value.startsWith('.') || path.extname(value) !== '.md') return;
+        const value = fileName.toString().replaceAll('\\', '/');
+        if (value.split('/').some((component) => component.startsWith('.'))) return;
+        const extension = path.posix.extname(value).toLowerCase();
+        if (extension && extension !== '.md') return;
       }
       if (this.scanTimer) clearTimeout(this.scanTimer);
       this.scanTimer = setTimeout(() => {

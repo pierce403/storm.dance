@@ -590,6 +590,80 @@ describe('NotebookCollaborationSession', () => {
     await session.stop();
   });
 
+  it('does not publish a local batch until its complete state is durable', async () => {
+    const network = new FakeXmtpNetwork();
+    const alice = network.createClient(
+      '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'alice-inbox',
+    );
+    let blockPersistence = false;
+    let releasePersistence: (() => void) | undefined;
+    const persistenceGate = new Promise<void>((resolve) => {
+      releasePersistence = resolve;
+    });
+    const { session } = createSession(alice, {
+      onStateChange: async () => {
+        if (blockPersistence) await persistenceGate;
+      },
+    });
+    await session.start([collaborator]);
+    await settleMessages();
+    const state = network.creations[0].state;
+    const baselineMessageCount = state.history.length;
+    blockPersistence = true;
+
+    session.upsertLocalNote({
+      ...baseNote,
+      notebookId: notebook.id,
+      content: 'durable before XMTP',
+      updatedAt: 2,
+    });
+    await advance(COLLABORATION_BATCH_MS);
+
+    expect(state.history).toHaveLength(baselineMessageCount);
+    releasePersistence?.();
+    await settleMessages(24);
+    expect(state.history).toHaveLength(baselineMessageCount + 1);
+
+    await session.stop();
+  });
+
+  it('projects, persists, and broadcasts a local native-vault update', async () => {
+    const network = new FakeXmtpNetwork();
+    const alice = network.createClient(
+      '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'alice-inbox',
+    );
+    const { session, projections, states } = createSession(alice);
+    await session.start([collaborator]);
+    await settleMessages();
+    const group = network.creations[0].state;
+    const baselineMessageCount = group.history.length;
+
+    const nativeReplica = new NotebookCrdt(notebook.id);
+    nativeReplica.applyUpdate(states.at(-1)!);
+    const before = nativeReplica.encodeStateVector();
+    nativeReplica.upsertNote({
+      ...baseNote,
+      content: 'edited through the native Markdown vault',
+      updatedAt: 2,
+    });
+    const nativeUpdate = nativeReplica.encodeDiff(before);
+    nativeReplica.destroy();
+
+    await expect(session.applyNativeUpdate(nativeUpdate)).resolves.toBe(true);
+    expect(session.projection.notes[0].content).toBe('edited through the native Markdown vault');
+    expect(projections.at(-1)?.notes[0].content)
+      .toBe('edited through the native Markdown vault');
+    expect(states.length).toBeGreaterThan(1);
+
+    await advance(COLLABORATION_BATCH_MS);
+    expect(group.history).toHaveLength(baselineMessageCount + 1);
+    expect(decodeHistory(group).at(-1)?.logical.kind).toBe('update');
+
+    await session.stop();
+  });
+
   it('flushes edits captured while an existing conversation lookup is still pending', async () => {
     const network = new FakeXmtpNetwork();
     const alice = network.createClient(

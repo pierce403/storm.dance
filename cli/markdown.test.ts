@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rename, symlink, unlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -44,9 +44,11 @@ describe('Markdown serialization', () => {
     const serialized = serializeMirrorNote(original);
 
     expect(serialized.split('\n')[0]).toBe(
-      '<!-- stormdance:{"schema":1,"notebookId":"notebook-1","noteId":"12345678-90ab-cdef-1234-567890abcdef","folderId":"folder-1","createdAt":100,"updatedAt":200} -->',
+      `<!-- stormdance:{"schema":${MIRROR_SCHEMA},"notebookId":"notebook-1","noteId":"12345678-90ab-cdef-1234-567890abcdef","folderId":"folder-1","createdAt":100,"updatedAt":200} -->`,
     );
     expect(parseMirrorNote(serialized)).toEqual(original);
+    expect(parseMirrorNote(serialized.replace(`"schema":${MIRROR_SCHEMA}`, '"schema":1')))
+      .toEqual(original);
   });
 
   it('rejects malformed storm.dance metadata instead of importing it as an unowned file', () => {
@@ -57,7 +59,7 @@ describe('Markdown serialization', () => {
 });
 
 describe('Markdown materialization', () => {
-  it('writes atomically, suppresses unchanged writes, updates, and renames by title', async () => {
+  it('writes atomically, suppresses unchanged writes, and keeps a stable path across title edits', async () => {
     const root = await makeTemporaryDirectory();
     const first = await materializeMirror(root, [note()]);
     const firstPath = first.manifest.notes[note().id].path;
@@ -78,9 +80,9 @@ describe('Markdown materialization', () => {
     const renamedNote = note({ title: 'Renamed Note', content: 'changed', updatedAt: 400 });
     const renamed = await materializeMirror(root, [renamedNote]);
     const renamedPath = renamed.manifest.notes[note().id].path;
-    expect(renamedPath).toMatch(/^renamed-note--[a-z0-9]{12}\.md$/);
-    expect(renamed.removedPaths).toEqual([firstPath]);
-    await expect(readFile(path.join(root, firstPath))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(renamedPath).toBe(firstPath);
+    expect(renamed.removedPaths).toEqual([]);
+    expect(parseMirrorNote(await readFile(path.join(root, firstPath), 'utf8')).title).toBe('Renamed Note');
   });
 
   it('uses collision-safe names and tombstones only manifest-owned files', async () => {
@@ -155,6 +157,7 @@ describe('Markdown scanning', () => {
       deletedNoteIds: [],
       ignoredPaths: [],
       preferredPaths: {},
+      witnesses: {},
     });
 
     const edited = note({ content: 'edited outside storm.dance', updatedAt: 250 });
@@ -195,6 +198,74 @@ describe('Markdown scanning', () => {
       deletedNoteIds: [],
       ignoredPaths: [],
       preferredPaths: {},
+      witnesses: {},
+    });
+  });
+
+  it('does not treat YAML comments or fenced headings as the note title', async () => {
+    const root = await makeTemporaryDirectory();
+    const source = [
+      '---',
+      '# YAML comment',
+      'tags: [storm]',
+      '---',
+      '```md',
+      '# Fenced heading',
+      '```',
+      '# Actual title',
+      '',
+      'Body',
+    ].join('\n');
+    await writeFile(path.join(root, 'fences.md'), source, 'utf8');
+
+    const result = await scanMirror(root, 'notebook-1', {
+      createId: () => 'fenced-note',
+      now: () => 500,
+    });
+
+    expect(result.upserts[0]).toMatchObject({
+      id: 'fenced-note',
+      title: 'Actual title',
+      content: '---\n# YAML comment\ntags: [storm]\n---\n```md\n# Fenced heading\n```\nBody',
+    });
+  });
+
+  it('adopts nested Obsidian Markdown and preserves YAML, wikilinks, and folder identity', async () => {
+    const root = await makeTemporaryDirectory();
+    await mkdir(path.join(root, 'Research'));
+    const source = '---\ntags: [storm]\n---\n# Field notes\n\nSee [[Other note]] and ![[diagram.png]].\n';
+    await writeFile(path.join(root, 'Research', 'Field notes.md'), source, 'utf8');
+
+    const scan = await scanMirror(root, 'notebook-1', {
+      createId: () => 'nested-note',
+      now: () => 500,
+    });
+    expect(scan.upserts).toEqual([
+      expect.objectContaining({
+        id: 'nested-note',
+        title: 'Field notes',
+        folderId: 'obsidian:path:Research',
+        content: '---\ntags: [storm]\n---\nSee [[Other note]] and ![[diagram.png]].\n',
+      }),
+    ]);
+    expect(scan.preferredPaths).toEqual({ 'nested-note': 'Research/Field notes.md' });
+
+    const materialized = await materializeMirror(root, scan.upserts, {
+      preferredPaths: scan.preferredPaths,
+    });
+    expect(materialized.manifest.notes['nested-note'].path).toBe('Research/Field notes.md');
+    expect(materialized.manifest.folders['obsidian:path:Research']).toBe('Research');
+    const canonical = await readFile(path.join(root, 'Research', 'Field notes.md'), 'utf8');
+    expect(canonical).toContain(`<!-- stormdance:{"schema":${MIRROR_SCHEMA}`);
+    expect(canonical).toContain('tags: [storm]');
+    expect(canonical).toContain('[[Other note]]');
+    expect(canonical).toContain('![[diagram.png]]');
+    expect(await scanMirror(root, 'notebook-1')).toEqual({
+      upserts: [],
+      deletedNoteIds: [],
+      ignoredPaths: [],
+      preferredPaths: {},
+      witnesses: {},
     });
   });
 
@@ -208,6 +279,29 @@ describe('Markdown scanning', () => {
     expect(result.upserts).toHaveLength(1);
     expect(result.upserts[0].id).toBe(note().id);
     expect(result.deletedNoteIds).toEqual([]);
+  });
+
+  it('does not let a stale scan acknowledgement overwrite a newer save', async () => {
+    const root = await makeTemporaryDirectory();
+    const materialized = await materializeMirror(root, [note()]);
+    const relativePath = materialized.manifest.notes[note().id].path;
+    await writeFile(
+      path.join(root, relativePath),
+      serializeMirrorNote(note({ content: 'first scanned save', updatedAt: 300 })),
+      'utf8',
+    );
+    const scan = await scanMirror(root, 'notebook-1', { now: () => 1_000 });
+    expect(scan.witnesses[note().id]).toEqual(expect.objectContaining({ path: relativePath }));
+
+    const newer = serializeMirrorNote(note({ content: 'newer save after scan', updatedAt: 400 }));
+    await writeFile(path.join(root, relativePath), newer, 'utf8');
+    const result = await materializeMirror(root, scan.upserts, {
+      preferredPaths: scan.preferredPaths,
+      witnesses: scan.witnesses,
+    });
+
+    expect(result.protectedPaths).toEqual([relativePath]);
+    expect(await readFile(path.join(root, relativePath), 'utf8')).toBe(newer);
   });
 
   it('does not let an unowned duplicate steal a manifest-owned note by filename order', async () => {
@@ -262,5 +356,31 @@ describe('Markdown scanning', () => {
     await materializeMirror(root, [note({ id: 'danger', deleted: true })]);
     expect(await readFile(outside, 'utf8')).toBe('outside data');
     await unlink(outside);
+  });
+
+  it.runIf(process.platform !== 'win32')('protects files when a managed parent is replaced by a symlink', async () => {
+    const root = await makeTemporaryDirectory();
+    const outside = await makeTemporaryDirectory();
+    const nested = note({ folderId: 'obsidian:path:Nested' });
+
+    await mkdir(path.join(root, 'Nested'));
+    await writeFile(path.join(root, 'Nested', 'note.md'), serializeMirrorNote(nested), 'utf8');
+    const initial = await materializeMirror(root, [nested], {
+      preferredPaths: { [nested.id]: 'Nested/note.md' },
+    });
+    expect(initial.manifest.notes[nested.id].path).toBe('Nested/note.md');
+
+    await rm(path.join(root, 'Nested'), { recursive: true });
+    await writeFile(path.join(outside, 'note.md'), 'outside data', 'utf8');
+    await symlink(outside, path.join(root, 'Nested'), 'dir');
+
+    const scan = await scanMirror(root, nested.notebookId);
+    expect(scan.deletedNoteIds).not.toContain(nested.id);
+    expect(scan.ignoredPaths).toContain('Nested');
+
+    const tombstone = await materializeMirror(root, [{ ...nested, deleted: true }]);
+    expect(tombstone.removedPaths).toEqual([]);
+    expect(tombstone.protectedPaths).toEqual(['Nested/note.md']);
+    expect(await readFile(path.join(outside, 'note.md'), 'utf8')).toBe('outside data');
   });
 });

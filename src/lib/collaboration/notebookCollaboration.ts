@@ -142,6 +142,7 @@ export class NotebookCollaborationSession {
   private batchTimer: ReturnType<typeof setTimeout> | null = null;
   private flushPromise: Promise<void> | null = null;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private persistenceQueue: Promise<void> = Promise.resolve();
   private readonly stopCapturing: () => void;
   private stopped = false;
   private stopPromise: Promise<void> | null = null;
@@ -310,6 +311,23 @@ export class NotebookCollaborationSession {
   updateNotebook(name: string, updatedAt = Date.now()) {
     if (this.stopped) return;
     this.crdt.updateNotebook({ name, updatedAt });
+  }
+
+  /**
+   * Merge an update produced by this desktop installation's native vault.
+   * It is local for transport purposes (so it is batched onto XMTP), while the
+   * resulting projection must still be materialized into the React/IndexedDB
+   * view because the edit originated outside the webview.
+   */
+  async applyNativeUpdate(update: Uint8Array) {
+    this.throwIfStopped();
+    const before = this.crdt.encodeStateVector();
+    this.crdt.applyLocalUpdate(update);
+    if (equalBytes(before, this.crdt.encodeStateVector())) return false;
+    await this.persistNow();
+    this.throwIfStopped();
+    await this.onRemoteProjection(this.crdt.snapshot());
+    return true;
   }
 
   stop() {
@@ -571,6 +589,10 @@ export class NotebookCollaborationSession {
     const merged = mergeCrdtUpdates(updates);
     const work = (async () => {
       try {
+        // The optimistic UI is already updated, but the authoritative CRDT
+        // must be durable (IndexedDB and any watched native vault) before its
+        // delta is acknowledged on XMTP.
+        await this.persistNow();
         await this.sendProtocol({
           kind: 'update',
           notebookId: this.notebook.id,
@@ -608,7 +630,9 @@ export class NotebookCollaborationSession {
     if (this.stopped || this.persistTimer) return;
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
-      void this.persistNow();
+      void this.persistNow().catch((error) => {
+        console.warn('Could not persist storm.dance collaboration state', error);
+      });
     }, 100);
   }
 
@@ -618,7 +642,13 @@ export class NotebookCollaborationSession {
       this.persistTimer = null;
     }
     if (!this.hasAuthoritativeState) return;
-    await this.onStateChange(this.crdt.encodeUpdate(), this.conversationId);
+    const state = this.crdt.encodeUpdate();
+    const conversationId = this.conversationId;
+    const work = this.persistenceQueue
+      .catch(() => undefined)
+      .then(() => this.onStateChange(state, conversationId));
+    this.persistenceQueue = work.catch(() => undefined);
+    await work;
   }
 
   private acceptAuthoritativeState() {

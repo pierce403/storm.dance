@@ -1,10 +1,10 @@
 # storm.dance
 
 storm.dance is a local-first Markdown notebook with real-time, encrypted XMTP
-collaboration. Notes live in IndexedDB for the web app and can also be mirrored
-to a normal directory of `.md` files with the Node CLI.
+collaboration. It runs as a complete hosted web app or a Tauri desktop app, and
+notebooks can be mirrored into ordinary Obsidian-compatible Markdown vaults.
 
-## Implemented (live-network validation pending)
+## Implemented
 
 - Browser notebooks, folders, tabs, Markdown editing, import, and encrypted
   backup export.
@@ -15,10 +15,17 @@ to a normal directory of `.md` files with the Node CLI.
 - Invite discovery and acceptance through XMTP group consent.
 - A bidirectional Markdown directory mirror suitable for local search,
   embeddings, vector indexing, static-site tooling, or another editor.
+- A shared Rust/Yrs core, strict cross-language fixtures, nested native vault
+  projection, filesystem-first native CLI, and typed Tauri CRDT bridge.
+- Tauri development packages for Windows, macOS (Apple Silicon and Intel), and
+  Linux, plus native CLI archives, built by the package matrix workflow.
 
-The protocol and transport behavior are covered by deterministic multi-replica
-tests. A two-identity XMTP dev-network smoke test is still required before this
-should be treated as production-ready collaboration.
+The deterministic suite covers Yjs/Yrs compatibility, protocol chunking,
+concurrent edits, state-vector repair, native IPC, and filesystem safety. An
+XMTP dev-network workflow on relevant `main` changes exercises the actual web/Tauri collaboration
+session and Node CLI directory-sync code paths with three disposable XMTP
+installations. Packaging artifacts are unsigned development builds until the
+platform signing secrets are configured.
 
 The sync design and current limitations are documented in
 [SYNC_PROTOCOL.md](./SYNC_PROTOCOL.md). The feature/test inventory is in
@@ -29,6 +36,7 @@ The sync design and current limitations are documented in
 - Node.js 22 or newer
 - npm
 - A modern browser with IndexedDB, Web Workers, and WebAssembly
+- Rust 1.88 or newer for the native CLI/core and Tauri development
 
 ## Web app development
 
@@ -117,14 +125,62 @@ unset STORMDANCE_IMPORT_KEY
 Prefer a dedicated identity. Profiles live under the XDG data directory with
 0700 directories and 0600 credential/state files.
 
-Every mirrored Markdown file begins with a storm.dance metadata comment and an
-H1 title. Existing visible, flat `.md` files are adopted in place on first sync.
-The mirror does not follow symlinks or delete files it cannot verify it still
-owns.
+Every mirrored Markdown file contains a storm.dance identity comment and an H1
+title. When YAML frontmatter exists, the identity comment follows it rather than
+commandeering user keys. Existing `.md` files are adopted in place on first
+sync, including nested Obsidian folders. The schema-2 mirror does not follow
+symlinks or delete files it cannot verify it still owns.
 
-Folder IDs round-trip with notes, but folder names and folder-tree operations
-are not yet CRDT-synchronized. A browser that does not have a referenced folder
-shows the note at the notebook root; the CLI intentionally remains flat.
+Folder IDs and nested paths round-trip with notes, but browser folder entities
+and names are not yet CRDT-synchronized. A browser that does not recognize a
+referenced folder shows the note at the notebook root. The linked config also
+records the expected XMTP inbox ID, so copying a vault to the wrong identity
+fails closed when the Node CLI profile opens it instead of silently joining
+another inbox.
+
+## Native Rust CLI
+
+The Rust workspace contains `storm-core`, `storm-protocol`, `storm-storage`,
+`storm-xmtp`, and `storm-cli`. Build and inspect the filesystem-first client:
+
+```bash
+cargo build --locked --package storm-cli
+target/debug/stormdance --help
+```
+
+The native CLI provides `auth`, `list`, `link`, `sync`, `watch`, `status`,
+`doctor`, and `unlink` lifecycle commands. Its nested Markdown/Yrs behavior is
+usable now, while `sync` and `watch` explicitly report
+`networkSynchronized: false`. Direct live XMTP remains on the Node CLI: upstream
+`libxmtp` does not currently publish a stable Rust SDK, so the native binary
+ships an explicit pinned driver boundary and reports `liveTransportReady:
+false` instead of pretending local reconciliation reached the network.
+
+## Tauri desktop
+
+Run the shared React application in the desktop shell:
+
+```bash
+npm run desktop:dev
+```
+
+Build the current platform's installer/bundle:
+
+```bash
+npm run desktop:build
+```
+
+Link a vault with a one-shot run of the XMTP-capable Node CLI first. In the desktop app, open the
+information dialog and choose **Watch linked vault**. Native Yrs updates from
+ordinary file edits are applied as local Yjs updates and broadcast by the
+desktop XMTP session; browser or remote updates are merged back into the vault.
+The Tauri webview may be a different XMTP inbox that is already a member of the
+same notebook group: its native bridge validates notebook, conversation, and
+environment binding, while `expectedInboxId` continues to guard the CLI profile
+that originally linked the directory.
+Do not run the Node `--watch` process and the Tauri watcher against the same
+local vault simultaneously. The hosted web build never requires or probes a
+localhost daemon.
 
 ## Build output
 
@@ -137,10 +193,19 @@ This creates:
 - `dist/` for the static web app; and
 - `dist-cli/` for the Node CLI.
 
+The desktop packaging workflow uploads the XMTP-capable Node CLI as an
+installable npm tarball, local-only Rust CLI archives for each target, and
+unsigned development installers: AppImage/deb/rpm on Linux, MSI/NSIS on
+Windows, and DMG on Apple Silicon and Intel macOS.
+
+`cargo build --workspace` builds the native core/CLI, while
+`npm run desktop:build` creates Tauri output under `src-tauri/target/` (or the
+workspace target directory selected by Cargo).
+
 ## Security notes
 
 - XMTP MLS encrypts collaboration transport and enforces group membership.
-- The CLI identity is an encrypted ethers keystore with a stable encrypted XMTP
+- The Node CLI identity is an encrypted ethers keystore with a stable encrypted XMTP
   SQLite database.
 - The current browser identity implementation stores its raw EOA private key in
   `localStorage` without separate at-rest encryption or an export/recovery UI.

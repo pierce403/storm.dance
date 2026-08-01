@@ -25,6 +25,10 @@ import {
 import type { CollaborationContact, InvitePayload } from '@/lib/collaboration/types';
 import { dbService, type Notebook } from '@/lib/db';
 import type { BrowserClient } from '@/lib/xmtp-browser-sdk';
+import {
+  applyNativeNotebookState,
+  type NativeCrdtUpdate,
+} from '@/lib/nativeBridge';
 
 export type CollaborationStatus = 'idle' | 'starting' | 'active' | 'error';
 
@@ -39,6 +43,14 @@ interface UseNotebookCollaborationProps {
 }
 
 const copyArrayBuffer = (bytes: Uint8Array) => Uint8Array.from(bytes).buffer;
+
+const equalBytes = (left: Uint8Array, right: Uint8Array) => {
+  if (left.byteLength !== right.byteLength) return false;
+  for (let index = 0; index < left.byteLength; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+};
 
 const loadEnvironmentStates = async (notebookId: string) => {
   const [dev, production] = await Promise.all([
@@ -233,16 +245,100 @@ export function useNotebookCollaboration({
         const merged = current?.state.byteLength
           ? mergeCrdtUpdates([new Uint8Array(current.state), state])
           : state;
+        const nextConversationId = normalizeConversationId(conversationId)
+          ?? normalizeConversationId(current?.conversationId);
         await dbService.putCollaborationState(
           notebookId,
           copyArrayBuffer(merged),
-          normalizeConversationId(conversationId) ?? normalizeConversationId(current?.conversationId),
+          nextConversationId,
           env,
         );
+        if (nextConversationId) {
+          try {
+            await applyNativeNotebookState(
+              notebookId,
+              nextConversationId,
+              env,
+              merged,
+            );
+          } catch (error) {
+            console.warn('Could not materialize browser CRDT state into a native vault', error);
+            throw error;
+          }
+        }
       });
     statePersistenceQueueRef.current = queued;
     return queued;
   }, []);
+
+  const applyNativeUpdate = useCallback(async (
+    nativeUpdate: NativeCrdtUpdate,
+    update: Uint8Array,
+  ) => {
+    const conversationId = normalizeConversationId(nativeUpdate.conversationId);
+    if (!conversationId) throw new Error('Native vault update has no XMTP conversation binding');
+
+    const activeSession = sessionRef.current;
+    if (
+      activeSession?.notebookId === nativeUpdate.notebookId
+      && activeSession.topic === conversationId
+      && nativeUpdate.env === xmtpEnv
+    ) {
+      return activeSession.applyNativeUpdate(update);
+    }
+
+    const queued = statePersistenceQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const [notebook, states] = await Promise.all([
+          dbService.getNotebook(nativeUpdate.notebookId),
+          loadEnvironmentStates(nativeUpdate.notebookId),
+        ]);
+        if (!notebook) throw new Error(`Native vault notebook ${nativeUpdate.notebookId} is not available locally`);
+        const persisted = stateForEnvironment(states, nativeUpdate.env);
+        const notebookBinding = normalizeConversationId(notebook.xmtpBindings?.[nativeUpdate.env])
+          ?? (notebook.xmtpEnv === nativeUpdate.env
+            ? normalizeConversationId(notebook.xmtpTopic)
+            : null);
+        const storedBinding = normalizeConversationId(persisted?.conversationId) ?? notebookBinding;
+        if (storedBinding !== conversationId) {
+          throw new Error('Native vault XMTP conversation does not match the browser notebook binding');
+        }
+
+        const crdt = new NotebookCrdt(nativeUpdate.notebookId);
+        try {
+          if (persisted?.state.byteLength) {
+            crdt.applyUpdate(new Uint8Array(persisted.state));
+          }
+          const before = crdt.encodeStateVector();
+          crdt.applyLocalUpdate(update);
+          if (equalBytes(before, crdt.encodeStateVector())) return false;
+          const mergedState = crdt.encodeUpdate();
+          await dbService.putCollaborationState(
+            nativeUpdate.notebookId,
+            copyArrayBuffer(mergedState),
+            conversationId,
+            nativeUpdate.env,
+          );
+          await onRemoteProjection(crdt.snapshot());
+          // An inactive/offline notebook has no collaboration session whose
+          // persistence callback can fan this state out. Applying it here keeps
+          // every matching watched vault convergent; Rust's merged-state echo is
+          // idempotent because unchanged state vectors return above.
+          await applyNativeNotebookState(
+            nativeUpdate.notebookId,
+            conversationId,
+            nativeUpdate.env,
+            mergedState,
+          );
+          return true;
+        } finally {
+          crdt.destroy();
+        }
+      });
+    statePersistenceQueueRef.current = queued.then(() => undefined);
+    return queued;
+  }, [onRemoteProjection, xmtpEnv]);
 
   const persistInactiveLocalNote = useCallback((note: NoteShape) => {
     const queued = statePersistenceQueueRef.current
@@ -267,12 +363,21 @@ export function useNotebookCollaboration({
           // The app broadcasts optimistically before its IndexedDB write, so
           // the passed value—not the materialized row—is the newest local edit.
           crdt.upsertNote(note);
+          const mergedState = crdt.encodeUpdate();
           await dbService.putCollaborationState(
             note.notebookId,
-            copyArrayBuffer(crdt.encodeUpdate()),
+            copyArrayBuffer(mergedState),
             binding.conversationId,
             binding.env,
           );
+          if (binding.conversationId) {
+            await applyNativeNotebookState(
+              note.notebookId,
+              binding.conversationId,
+              binding.env,
+              mergedState,
+            );
+          }
         } finally {
           crdt.destroy();
         }
@@ -303,12 +408,21 @@ export function useNotebookCollaboration({
           if (persisted?.state.byteLength) crdt.applyUpdate(new Uint8Array(persisted.state));
           else crdt.seed(notebook, await dbService.getAllNotes(notebookId));
           crdt.updateNotebook({ name, updatedAt });
+          const mergedState = crdt.encodeUpdate();
           await dbService.putCollaborationState(
             notebookId,
-            copyArrayBuffer(crdt.encodeUpdate()),
+            copyArrayBuffer(mergedState),
             binding.conversationId,
             binding.env,
           );
+          if (binding.conversationId) {
+            await applyNativeNotebookState(
+              notebookId,
+              binding.conversationId,
+              binding.env,
+              mergedState,
+            );
+          }
         } finally {
           crdt.destroy();
         }
@@ -504,12 +618,21 @@ export function useNotebookCollaboration({
             crdt.seed(notebook, await dbService.getAllNotes(note.notebookId));
           }
           crdt.deleteNote(note.id, deletedAt);
+          const mergedState = crdt.encodeUpdate();
           await dbService.putCollaborationState(
             note.notebookId,
-            copyArrayBuffer(crdt.encodeUpdate()),
+            copyArrayBuffer(mergedState),
             binding.conversationId,
             binding.env,
           );
+          if (binding.conversationId) {
+            await applyNativeNotebookState(
+              note.notebookId,
+              binding.conversationId,
+              binding.env,
+              mergedState,
+            );
+          }
         } finally {
           crdt.destroy();
         }
@@ -639,6 +762,7 @@ export function useNotebookCollaboration({
     broadcastLocalUpdate,
     broadcastLocalDelete,
     broadcastNotebookRename,
+    applyNativeUpdate,
     inviteModalOpen,
     inviteDetails,
     acceptInvite,

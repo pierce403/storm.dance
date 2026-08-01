@@ -1,7 +1,13 @@
 import * as Y from 'yjs';
 import type { CrdtUpdatePayload } from './types.js';
+import {
+  NOTEBOOK_CRDT_GUID_PREFIX,
+  NOTEBOOK_CRDT_METADATA_MAP,
+  NOTEBOOK_CRDT_NOTES_MAP,
+  NOTEBOOK_CRDT_SCHEMA_VERSION,
+} from './compatibility.js';
 
-export const NOTEBOOK_CRDT_SCHEMA_VERSION = 1;
+export { NOTEBOOK_CRDT_SCHEMA_VERSION } from './compatibility.js';
 
 /**
  * Transactions created through NotebookCrdt use this origin. Consumers can
@@ -11,9 +17,6 @@ export const LOCAL_CRDT_ORIGIN = Symbol('stormdance-local-crdt-update');
 
 /** Remote and persisted updates are applied with this origin to prevent echo. */
 export const REMOTE_CRDT_ORIGIN = Symbol('stormdance-remote-crdt-update');
-
-const META_MAP_NAME = 'notebook';
-const NOTES_MAP_NAME = 'notes';
 
 type NoteMap = Y.Map<unknown>;
 
@@ -64,6 +67,17 @@ type AlignmentSegment =
   | { kind: 'change'; text: string; baseStart: number; baseEnd: number };
 
 const MAX_REBASE_EDIT_DISTANCE = 512;
+const utf8Encoder = new TextEncoder();
+
+const compareUtf8 = (left: string, right: string): number => {
+  const leftBytes = utf8Encoder.encode(left);
+  const rightBytes = utf8Encoder.encode(right);
+  const length = Math.min(leftBytes.byteLength, rightBytes.byteLength);
+  for (let index = 0; index < length; index += 1) {
+    if (leftBytes[index] !== rightBytes[index]) return leftBytes[index] - rightBytes[index];
+  }
+  return leftBytes.byteLength - rightBytes.byteLength;
+};
 
 /** JavaScript string offsets are UTF-16, but edits must never split a code point. */
 const codePoints = (value: string) => Array.from(value);
@@ -400,9 +414,9 @@ export class NotebookCrdt {
   constructor(notebookId: string, doc?: Y.Doc) {
     requireNonEmptyString(notebookId, 'notebookId');
     this.notebookId = notebookId;
-    this.doc = doc ?? new Y.Doc({ guid: `stormdance:notebook:${notebookId}` });
-    this.metadata = this.doc.getMap(META_MAP_NAME);
-    this.notes = this.doc.getMap<NoteMap>(NOTES_MAP_NAME);
+    this.doc = doc ?? new Y.Doc({ guid: `${NOTEBOOK_CRDT_GUID_PREFIX}${notebookId}` });
+    this.metadata = this.doc.getMap(NOTEBOOK_CRDT_METADATA_MAP);
+    this.notes = this.doc.getMap<NoteMap>(NOTEBOOK_CRDT_NOTES_MAP);
 
     const storedNotebookId = this.metadata.get('id');
     if (typeof storedNotebookId === 'string' && storedNotebookId !== notebookId) {
@@ -534,7 +548,7 @@ export class NotebookCrdt {
       },
       notes: Array.from(this.notes.entries())
         .map(([id, note]) => this.projectNote(id, note))
-        .sort((a, b) => a.id.localeCompare(b.id)),
+        .sort((a, b) => compareUtf8(a.id, b.id)),
     };
   }
 
@@ -568,6 +582,18 @@ export class NotebookCrdt {
       throw new Error('Yjs update must be a Uint8Array');
     }
     Y.applyUpdate(this.doc, update, REMOTE_CRDT_ORIGIN);
+  }
+
+  /**
+   * Apply a Yjs-compatible update produced by a local native vault. Unlike a
+   * network update, this deliberately uses the local origin so an active
+   * collaboration session persists and broadcasts it to the XMTP group.
+   */
+  applyLocalUpdate(update: Uint8Array) {
+    if (!(update instanceof Uint8Array)) {
+      throw new Error('Yjs update must be a Uint8Array');
+    }
+    Y.applyUpdate(this.doc, update, LOCAL_CRDT_ORIGIN);
   }
 
   /** Captures local transactions and returns an unsubscribe function. */

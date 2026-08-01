@@ -16,13 +16,20 @@ When working on this project, update this file whenever you learn something dura
 - Dev server: `npm run dev`
 - Unit tests: `npm test`
 - CLI build: `npm run build:cli`
+- Distributable CLI package: `npm run package:cli`
 - CLI from source: `npm run cli -- --help`
+- Live XMTP component smoke (uses disposable dev-network identities): `npm run test:xmtp:live`
+- Native deterministic tests: `cargo test --locked -p storm-core -p storm-protocol -p storm-storage -p storm-xmtp -p storm-cli`
+- Native lint: `cargo clippy --locked -p storm-core -p storm-protocol -p storm-storage -p storm-xmtp -p storm-cli --all-targets -- -D warnings`
+- Desktop dev/build/info: `npm run desktop:dev`, `npm run desktop:build`, `npm run desktop:info`
 - End-to-end tests: `npm run test:e2e`
 - Update Playwright snapshots intentionally: `npm run test:e2e:update`
 - Install Playwright-managed browsers when needed: `npm run test:e2e:install`
 
 ## Workflow
 - **Always** commit and push changes after every update or significant step.
+- During the current early-development phase, the maintainer prefers completed,
+  verified work pushed directly to `main` rather than opened as a PR.
 - Before each push with app changes, bump `package.json` and `package-lock.json` version so the app info dialog reflects the new release.
 - Start by checking `git status --short --branch`.
 - Read this file and `FEATURES.md` before significant implementation work.
@@ -41,8 +48,10 @@ When working on this project, update this file whenever you learn something dura
 
 ## CI/CD & Deployment
 - **Workflows**:
-    - `build.yml`: Runs on PRs and pushes to main. Verifies the build.
+    - `build.yml`: Runs on PRs and pushes to main. Verifies the web/CLI build, unit and Playwright suites, native core, and distributable Node CLI.
     - `deploy.yml`: Runs on pushes to `main`. Builds and deploys to GitHub Pages.
+    - `desktop.yml`: Builds unsigned desktop bundles and CLI archives for supported targets.
+    - `interoperability.yml`: Runs the three-installation XMTP dev-network component smoke on relevant `main` changes.
 - **Deployment Process**:
     1. Code is pushed to `main`.
     2. `deploy.yml` triggers.
@@ -86,9 +95,13 @@ When working on this project, update this file whenever you learn something dura
 - **Node CLI**:
     - `@xmtp/node-sdk` 6.x requires Node.js 22 in local development and CI.
     - CLI identities live in XDG profile directories as encrypted ethers keystores; imports are stdin-only and private material must never appear in flags, output, or attached errors.
-    - Linked directories store strict config/state under `.stormdance/`; Markdown ownership is tracked by a manifest, and symlinks or unowned files must never be deleted.
+    - Linked directories use shared mirror schema 2 under `.stormdance/`; config records the expected inbox ID, Markdown ownership is tracked by a manifest, and symlinks or unowned files must never be deleted.
     - Metadata-free Markdown must be adopted in place through `scanMirror(...).preferredPaths`; writing a second canonical copy causes repeat-import duplicates.
-    - The CLI mirror is flat. Folder IDs round-trip in note metadata, but folder entities/names are not yet CRDT-synchronized. Browser notes whose folder is unknown locally must remain visible at the notebook root.
+    - The CLI and Rust/Tauri mirror both support nested Obsidian paths. Folder IDs round-trip in note metadata/manifest, but browser folder entities/names are not yet CRDT-synchronized. Browser notes whose folder is unknown locally must remain visible at the notebook root.
+    - Do not run the Node watcher and Tauri watcher against the same local vault concurrently until the cross-runtime vault lock lands.
+    - The packaged Node CLI is the supported live XMTP headless client. The current Rust CLI is local-only and must report `networkSynchronized: false`; never describe its `sync` command as network synchronization until a real libxmtp driver is wired.
+    - Tauri reuses the browser XMTP/Yjs session in its webview and bridges it to the Rust/Yrs vault. Direct native libxmtp remains behind the pinned `storm-xmtp` driver boundary.
+    - Cross-language fixtures live in `test-fixtures/yjs-v1/`. Regenerate browser/Yjs fixtures with `node test-fixtures/yjs-v1/generate.mjs`; regenerate the native/Yrs producer with `cargo run --locked -p storm-core --example generate_yjs_fixture > test-fixtures/yjs-v1/yrs-producer.json`. Require a clean second run for either generator.
 - **Vite Config**: Do **NOT** alias `@xmtp/browser-sdk` to a local file (e.g., `src/lib/xmtp-browser-sdk.ts`) as it causes circular dependencies.
 - **Reference**: [XMTP LLM Chat Apps](https://raw.githubusercontent.com/xmtp/docs-xmtp-org/main/llms/llms-chat-apps.txt)
 

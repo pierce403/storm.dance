@@ -306,6 +306,7 @@ async function runLink(
       notebookName: notebookDisplayName(resolved.group.name, resolved.notebookId),
       profile,
       env,
+      expectedInboxId: client.inboxId,
     };
     const root = await dependencies.writeLinkConfig(directory, config);
     await dependencies.runDirectorySync({

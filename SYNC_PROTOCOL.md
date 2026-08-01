@@ -80,28 +80,46 @@ still synchronize with each other.
 
 ## Markdown directory mirror
 
-The Node 22 CLI links one notebook to a real directory:
+The XMTP-capable Node 22 CLI and the Rust/Tauri vault bridge share mirror schema
+2. One linked vault contains:
 
-- each live note is a flat, collision-safe `.md` file;
-- a leading HTML comment stores stable notebook/note IDs, folder ID, and
-  timestamps;
-- `.stormdance/config.json` stores the XMTP link;
-- `.stormdance/state.bin` stores the local Yjs replica; and
-- `.stormdance/manifest.json` records files owned by the mirror.
+- nested, collision-safe `.md` files whose existing paths remain stable when a
+  title changes;
+- an HTML identity comment, placed after YAML frontmatter when present, carrying
+  stable notebook/note IDs, folder ID, and timestamps;
+- `.stormdance/config.json` with notebook, conversation, environment, profile,
+  and expected-inbox binding;
+- `.stormdance/state.bin`, a Yjs-v1 update accepted by both Yjs and Yrs; and
+- `.stormdance/manifest.json`, mapping note IDs to owned relative paths/hashes
+  and folder IDs to Obsidian directories.
 
-Existing metadata-free Markdown files are adopted in place on first sync and
-rewritten with canonical metadata. Files not owned by the manifest are never
-deleted. Manifest hashes also protect an owned path that was edited, removed,
-replaced, or made invalid before the scanner incorporated that change. Symlinks,
-path traversal, invalid UTF-8, malformed metadata, and unsafe manifest paths are
-ignored or rejected. Writes use same-directory temporary files and atomic
-rename.
+Schema-1 flat vaults are read and upgraded in place. Metadata-free Markdown is
+adopted at its existing path, including nested files. YAML frontmatter,
+wikilinks, embeds, and fenced code remain note content. Files not owned by the
+manifest are never deleted. Both mirrors revalidate exact path-and-hash scan
+witnesses before acknowledging a save. The Rust/Tauri mirror retains ambiguous
+remote/local replacements as named conflict files; the Node mirror protects the
+newer file in place for a later scan. Hidden directories, symlinks, path
+traversal, invalid UTF-8, malformed metadata, and unsafe manifest parents are
+ignored, protected, or rejected. Writes use same-directory temporary files,
+flushes, and atomic rename.
 
-The mirror is intentionally flat so any Markdown indexer, embedding pipeline,
-or vector database can consume it without understanding storm.dance. Folder IDs
-round-trip in metadata, but folder names and the browser folder tree are not yet
-represented as Markdown directories or CRDT entities. A browser replica shows
-notes whose folder ID is unknown locally at the notebook root.
+Any Markdown indexer, embedding pipeline, or vector database can consume this
+vault without understanding storm.dance. Folder IDs round-trip, and directories
+created outside storm.dance receive stable `obsidian:path:<relative path>` IDs.
+The browser does not yet synchronize folder entities/names, so a replica that
+does not recognize a folder ID shows that note at the notebook root.
+
+## Runtime boundaries
+
+- Hosted web uses Yjs, IndexedDB, and `@xmtp/browser-sdk` directly.
+- Tauri hosts the same XMTP/Yjs frontend session and exchanges bounded complete
+  Yjs-v1 recovery states with the Rust/Yrs vault watcher through typed IPC;
+  native-originated changes enter the frontend as local CRDT updates.
+- The packaged Node CLI is the live headless XMTP directory client.
+- The packaged Rust CLI currently reconciles local Markdown/Yrs state only and
+  reports `networkSynchronized: false`; `storm-xmtp` provides the tested native
+  transport boundary, but the pinned direct libxmtp driver is not shipped yet.
 
 ## Compatibility
 
@@ -109,7 +127,7 @@ notes whose folder ID is unknown locally at the notebook root.
 - CLI transport: `@xmtp/node-sdk` 6.x and Node.js 22 or newer.
 - Yjs document schema: 1.
 - Wire protocol version: 1.
-- Markdown mirror schema: 1.
+- Markdown mirror schema: 2 (schema 1 is accepted for migration).
 
 Unknown protocol versions are ignored rather than guessed. A schema change must
 preserve stable notebook/note IDs and include an explicit migration path.

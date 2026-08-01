@@ -1,0 +1,35 @@
+[package]
+name = "storm-desktop"
+description = "Native storm.dance desktop shell"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+default-run = "storm-dance"
+
+[lib]
+name = "storm_dance_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "storm-dance"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.6.2", features = [] }
+
+[dependencies]
+base64.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+storm-core = { path = "../crates/storm-core" }
+storm-storage = { path = "../crates/storm-storage" }
+tauri = { version = "2.11.2", features = ["tray-icon"] }
+tauri-plugin-dialog = "2.7.2"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

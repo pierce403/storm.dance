@@ -203,4 +203,17 @@ describe('NotebookCrdt', () => {
     expect(origins).toHaveLength(1);
     expect(origins).not.toContain(REMOTE_CRDT_ORIGIN);
   });
+
+  it('captures a Yrs-compatible native update as a local change', () => {
+    const nativeReplica = new NotebookCrdt('nb-1');
+    nativeReplica.seed(notebook, [note]);
+    const browserReplica = new NotebookCrdt('nb-1');
+    const outbound: Uint8Array[] = [];
+    browserReplica.captureLocalUpdates((update) => outbound.push(update));
+
+    browserReplica.applyLocalUpdate(nativeReplica.encodeUpdate());
+
+    expect(browserReplica.snapshot()).toEqual(nativeReplica.snapshot());
+    expect(outbound).toHaveLength(1);
+  });
 });

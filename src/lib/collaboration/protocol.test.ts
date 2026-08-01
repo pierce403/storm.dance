@@ -80,6 +80,22 @@ describe('storm.dance collaboration protocol', () => {
 
     const badBase64 = `${STORMDANCE_PROTOCOL_PREFIX}${JSON.stringify({ ...valid, payload: '!!!!' })}`;
     expect(() => decodeProtocolChunk(badBase64)).toThrow('canonical base64');
+
+    const nonCanonicalBase64 = `${STORMDANCE_PROTOCOL_PREFIX}${JSON.stringify({ ...valid, payload: 'AB==' })}`;
+    expect(() => decodeProtocolChunk(nonCanonicalBase64)).toThrow('canonical base64');
+  });
+
+  it('applies portable UTF-8 byte limits to protocol strings', () => {
+    const manifest = (notebookName: string) => encodeProtocolMessage({
+      kind: 'manifest' as const,
+      notebookId: 'nb-1',
+      messageId: 'manifest-unicode',
+      sentAt: 1,
+      notebookName,
+      schemaVersion: 1,
+    });
+    expect(() => manifest('é'.repeat(256))).not.toThrow();
+    expect(() => manifest('é'.repeat(257))).toThrow('notebookName');
   });
 
   it('rejects inconsistent chunks and bounded reassembly overflow', () => {

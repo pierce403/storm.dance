@@ -1,0 +1,78 @@
+{
+  "fixtureFormat": "storm.dance/yrs-v1-producer",
+  "fixtureVersion": 1,
+  "fullState": {
+    "expectedProjection": {
+      "notebook": {
+        "createdAt": 1725100000000,
+        "id": "rust-fixture-notebook-v1",
+        "name": "Yrs producer fixture",
+        "updatedAt": 1725100000000
+      },
+      "notes": [
+        {
+          "content": "Hello from Yrs 🦀",
+          "createdAt": 1725100000001,
+          "deleted": false,
+          "deletedAt": null,
+          "folderId": null,
+          "id": "rust-note",
+          "title": "Native interoperability",
+          "updatedAt": 1725100000000
+        }
+      ],
+      "schemaVersion": 1
+    },
+    "stateVector": {
+      "byteLength": 7,
+      "data": "AYDhgYMFNQ==",
+      "encoding": "base64"
+    },
+    "update": {
+      "byteLength": 395,
+      "data": "AQ+A4YGDBQAoAQhub3RlYm9vaw1zY2hlbWFWZXJzaW9uAX0BKAEIbm90ZWJvb2sCaWQBdxhydXN0LWZpeHR1cmUtbm90ZWJvb2stdjEoAQhub3RlYm9vawRuYW1lAXcUWXJzIHByb2R1Y2VyIGZpeHR1cmUoAQhub3RlYm9vawljcmVhdGVkQXQBfYCMyP+0ZCgBCG5vdGVib29rCXVwZGF0ZWRBdAF9gIzI/7RkJwEFbm90ZXMJcnVzdC1ub3RlAScAgOGBgwUFBXRpdGxlAgQAgOGBgwUGF05hdGl2ZSBpbnRlcm9wZXJhYmlsaXR5JwCA4YGDBQUHY29udGVudAIEAIDhgYMFHhNIZWxsbyBmcm9tIFlycyDwn6aAKACA4YGDBQUIZm9sZGVySWQBfigAgOGBgwUFCWNyZWF0ZWRBdAF9gYzI/7RkKACA4YGDBQUJdXBkYXRlZEF0AX2AjMj/tGQoAIDhgYMFBQdkZWxldGVkAXkoAIDhgYMFBQlkZWxldGVkQXQBfgA=",
+      "encoding": "base64"
+    }
+  },
+  "incremental": {
+    "afterStateVector": {
+      "byteLength": 7,
+      "data": "AYDhgYMFUA==",
+      "encoding": "base64"
+    },
+    "expectedProjection": {
+      "notebook": {
+        "createdAt": 1725100000000,
+        "id": "rust-fixture-notebook-v1",
+        "name": "Yrs producer fixture",
+        "updatedAt": 1725100000100
+      },
+      "notes": [
+        {
+          "content": "Incremental native edit. Hello from Yrs 🦀",
+          "createdAt": 1725100000001,
+          "deleted": false,
+          "deletedAt": null,
+          "folderId": null,
+          "id": "rust-note",
+          "title": "Native interoperability",
+          "updatedAt": 1725100000100
+        }
+      ],
+      "schemaVersion": 1
+    },
+    "update": {
+      "byteLength": 82,
+      "data": "AQOA4YGDBTVEgOGBgwUfGUluY3JlbWVudGFsIG5hdGl2ZSBlZGl0LiCogOGBgwUyAX2kjcj/tGSogOGBgwUEAX2kjcj/tGQBgOGBgwUCBAEyAQ==",
+      "encoding": "base64"
+    }
+  },
+  "notebookId": "rust-fixture-notebook-v1",
+  "producer": {
+    "clientId": 1348497536,
+    "command": "cargo run --locked -p storm-core --example generate_yjs_fixture",
+    "library": "yrs",
+    "libraryVersion": "0.27.3",
+    "runtime": "rust"
+  }
+}

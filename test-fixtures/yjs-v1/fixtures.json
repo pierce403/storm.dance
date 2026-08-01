@@ -1,0 +1,409 @@
+{
+  "fixtureFormat": "storm.dance/yjs-v1-fixtures",
+  "fixtureVersion": 1,
+  "generator": {
+    "runtime": "node",
+    "library": "yjs",
+    "libraryVersion": "13.6.31",
+    "command": "node test-fixtures/yjs-v1/generate.mjs"
+  },
+  "contract": {
+    "id": "storm.dance/compatibility",
+    "version": 1,
+    "transport": {
+      "protocol": "storm.dance/yjs",
+      "version": 1,
+      "prefix": "stormdance-sync/1\n",
+      "payloadEncoding": "base64",
+      "updateEncoding": "yjs-v1",
+      "messageKinds": [
+        "manifest",
+        "sync-request",
+        "update",
+        "snapshot"
+      ],
+      "chunkIdentity": [
+        "notebookId",
+        "kind",
+        "messageId"
+      ],
+      "logicalPayloadField": {
+        "manifest": null,
+        "sync-request": "stateVector",
+        "update": "update",
+        "snapshot": "update"
+      },
+      "limits": {
+        "defaultChunkBytes": 262144,
+        "maxChunkBytes": 524288,
+        "maxChunks": 128,
+        "maxPayloadBytes": 33554432,
+        "maxWireChars": 800000,
+        "maxIdBytes": 256,
+        "maxNameBytes": 512
+      }
+    },
+    "crdt": {
+      "schemaVersion": 1,
+      "updateEncoding": "yjs-v1",
+      "stateVectorEncoding": "yjs-v1",
+      "guidPrefix": "stormdance:notebook:",
+      "roots": {
+        "notebook": {
+          "name": "notebook",
+          "type": "Y.Map",
+          "fields": {
+            "schemaVersion": "integer",
+            "id": "string",
+            "name": "string",
+            "createdAt": "non-negative-safe-integer",
+            "updatedAt": "non-negative-safe-integer"
+          }
+        },
+        "notes": {
+          "name": "notes",
+          "type": "Y.Map<noteId,Y.Map>",
+          "identity": "map-key",
+          "fields": {
+            "title": "Y.Text",
+            "content": "Y.Text",
+            "folderId": "string|null",
+            "createdAt": "non-negative-safe-integer",
+            "updatedAt": "non-negative-safe-integer",
+            "deleted": "boolean",
+            "deletedAt": "non-negative-safe-integer|null"
+          }
+        }
+      },
+      "semantics": {
+        "missingDeleted": false,
+        "tombstonesAreRetained": true,
+        "timestampsResolveTextConflicts": false,
+        "noteOrder": "lexicographic-note-id"
+      }
+    }
+  },
+  "ids": {
+    "notebookId": "fixture-notebook-v1",
+    "baseClientId": 270544960,
+    "leftClientId": 540033104,
+    "rightClientId": 809521248
+  },
+  "cases": {
+    "fullState": {
+      "update": {
+        "encoding": "base64",
+        "byteLength": 727,
+        "sha256": "649ef4175429637a913ffb4c2bed0bbf7e97a679efe39d48be85de51e2a3169e",
+        "data": "ARnA4ICBAQAoAQhub3RlYm9vaw1zY2hlbWFWZXJzaW9uAX0BKAEIbm90ZWJvb2sCaWQBdxNmaXh0dXJlLW5vdGVib29rLXYxKAEIbm90ZWJvb2sEbmFtZQF3GUludGVyb3BlcmFiaWxpdHkgZml4dHVyZXMoAQhub3RlYm9vawljcmVhdGVkQXQBe0J5GiAyIAAAKAEIbm90ZWJvb2sJdXBkYXRlZEF0AXtCeRogMiAAACcBBW5vdGVzCm5vdGUtYWxwaGEBJwDA4ICBAQUFdGl0bGUCBADA4ICBAQYOUHJvdG9jb2wgbm90ZXMnAMDggIEBBQdjb250ZW50AgQAwOCAgQEVQ0Egc2hhcmVkIGxpbmUuCgotIFsgXSBWYWxpZGF0ZSBbW3N5bmNdXQoKPiBbIW5vdGVdIFBvcnRhYmxlIOKbiO+4jwooAMDggIEBBQhmb2xkZXJJZAF3D2ZvbGRlci1yZXNlYXJjaCgAwOCAgQEFCWNyZWF0ZWRBdAF7QnkaIDIgoAAoAMDggIEBBQl1cGRhdGVkQXQBe0J5GiAyIKAAKADA4ICBAQUHZGVsZXRlZAF5KADA4ICBAQUJZGVsZXRlZEF0AX4nAQVub3Rlcwlub3RlLWJldGEBJwDA4ICBAVoFdGl0bGUCBADA4ICBAVsPRW1iZWRkZWQgYXNzZXRzJwDA4ICBAVoHY29udGVudAIEAMDggIEBa0chW1tkaWFncmFtLnBuZ11dCgpTZWUgW3RoZSBwcm90b2NvbF0oUHJvdG9jb2wlMjBub3Rlcy5tZCN3aXJlLWZvcm1hdCkuCigAwOCAgQFaCGZvbGRlcklkAX4oAMDggIEBWgljcmVhdGVkQXQBe0J5GiAyIUAAKADA4ICBAVoJdXBkYXRlZEF0AXtCeRogMiFAACgAwOCAgQFaB2RlbGV0ZWQBeSgAwOCAgQFaCWRlbGV0ZWRBdAF+AA=="
+      },
+      "stateVector": {
+        "encoding": "base64",
+        "byteLength": 8,
+        "sha256": "2cb85ecef73949d59cb474e038bdc60a32b68007112805d79f645c146a2cc9da",
+        "data": "AcDggIEBuAE="
+      },
+      "expectedProjection": {
+        "schemaVersion": 1,
+        "notebook": {
+          "id": "fixture-notebook-v1",
+          "name": "Interoperability fixtures",
+          "createdAt": 1725000000000,
+          "updatedAt": 1725000000000
+        },
+        "notes": [
+          {
+            "id": "note-alpha",
+            "title": "Protocol notes",
+            "content": "A shared line.\n\n- [ ] Validate [[sync]]\n\n> [!note] Portable ⛈️\n",
+            "folderId": "folder-research",
+            "createdAt": 1725000000010,
+            "updatedAt": 1725000000010,
+            "deleted": false,
+            "deletedAt": null
+          },
+          {
+            "id": "note-beta",
+            "title": "Embedded assets",
+            "content": "![[diagram.png]]\n\nSee [the protocol](Protocol%20notes.md#wire-format).\n",
+            "folderId": null,
+            "createdAt": 1725000000020,
+            "updatedAt": 1725000000020,
+            "deleted": false,
+            "deletedAt": null
+          }
+        ]
+      }
+    },
+    "incremental": {
+      "update": {
+        "encoding": "base64",
+        "byteLength": 345,
+        "sha256": "6fa1a36a87515a92a4da28f96e56063ef01e5992d7df72e09ff3e5d20b903873",
+        "data": "AQ3A4ICBAbgBqMDggIEBBAF7QnkaIDImQABEwOCAgQEWDkJyb3dzZXIgZWRpdDogqMDggIEBVwF7QnkaIDImQAAnAQVub3Rlcwpub3RlLWdhbW1hAScAwOCAgQHIAQV0aXRsZQIEAMDggIEByQERT2ZmbGluZSBjaGVja2xpc3QnAMDggIEByAEHY29udGVudAIEAMDggIEB2wEsLSBbeF0gQ3JlYXRlIHN0YXRlIHZlY3RvcgotIFsgXSBBcHBseSBkZWx0YQooAMDggIEByAEIZm9sZGVySWQBdw9mb2xkZXItcmVzZWFyY2goAMDggIEByAEJY3JlYXRlZEF0AXtCeRogMiZAACgAwOCAgQHIAQl1cGRhdGVkQXQBe0J5GiAyJkAAKADA4ICBAcgBB2RlbGV0ZWQBeSgAwOCAgQHIAQlkZWxldGVkQXQBfgHA4ICBAQIEAVcB"
+      },
+      "deltaFromBaseStateVector": {
+        "encoding": "base64",
+        "byteLength": 345,
+        "sha256": "6fa1a36a87515a92a4da28f96e56063ef01e5992d7df72e09ff3e5d20b903873",
+        "data": "AQ3A4ICBAbgBqMDggIEBBAF7QnkaIDImQABEwOCAgQEWDkJyb3dzZXIgZWRpdDogqMDggIEBVwF7QnkaIDImQAAnAQVub3Rlcwpub3RlLWdhbW1hAScAwOCAgQHIAQV0aXRsZQIEAMDggIEByQERT2ZmbGluZSBjaGVja2xpc3QnAMDggIEByAEHY29udGVudAIEAMDggIEB2wEsLSBbeF0gQ3JlYXRlIHN0YXRlIHZlY3RvcgotIFsgXSBBcHBseSBkZWx0YQooAMDggIEByAEIZm9sZGVySWQBdw9mb2xkZXItcmVzZWFyY2goAMDggIEByAEJY3JlYXRlZEF0AXtCeRogMiZAACgAwOCAgQHIAQl1cGRhdGVkQXQBe0J5GiAyJkAAKADA4ICBAcgBB2RlbGV0ZWQBeSgAwOCAgQHIAQlkZWxldGVkQXQBfgHA4ICBAQIEAVcB"
+      },
+      "afterStateVector": {
+        "encoding": "base64",
+        "byteLength": 8,
+        "sha256": "24a78061df922bd4df6c27b37025140b7e1dfa0d48c5f4ad51a0554395ef9721",
+        "data": "AcDggIEBjQI="
+      },
+      "expectedProjection": {
+        "schemaVersion": 1,
+        "notebook": {
+          "id": "fixture-notebook-v1",
+          "name": "Interoperability fixtures",
+          "createdAt": 1725000000000,
+          "updatedAt": 1725000000100
+        },
+        "notes": [
+          {
+            "id": "note-alpha",
+            "title": "Protocol notes",
+            "content": "Browser edit: A shared line.\n\n- [ ] Validate [[sync]]\n\n> [!note] Portable ⛈️\n",
+            "folderId": "folder-research",
+            "createdAt": 1725000000010,
+            "updatedAt": 1725000000100,
+            "deleted": false,
+            "deletedAt": null
+          },
+          {
+            "id": "note-beta",
+            "title": "Embedded assets",
+            "content": "![[diagram.png]]\n\nSee [the protocol](Protocol%20notes.md#wire-format).\n",
+            "folderId": null,
+            "createdAt": 1725000000020,
+            "updatedAt": 1725000000020,
+            "deleted": false,
+            "deletedAt": null
+          },
+          {
+            "id": "note-gamma",
+            "title": "Offline checklist",
+            "content": "- [x] Create state vector\n- [ ] Apply delta\n",
+            "folderId": "folder-research",
+            "createdAt": 1725000000100,
+            "updatedAt": 1725000000100,
+            "deleted": false,
+            "deletedAt": null
+          }
+        ]
+      }
+    },
+    "tombstone": {
+      "update": {
+        "encoding": "base64",
+        "byteLength": 87,
+        "sha256": "4a59ec42da920d7981e1268e9905ca4a3fedc8e690f8e1523c9fbe8f4e0c632f",
+        "data": "AQTA4ICBAY0CqMDggIEBuAEBe0J5GiAyLIAAqMDggIEBtgEBeKjA4ICBAbcBAXtCeRogMiyAAKjA4ICBAbUBAXtCeRogMiyAAAHA4ICBAQMEAVcBtQEE"
+      },
+      "afterStateVector": {
+        "encoding": "base64",
+        "byteLength": 8,
+        "sha256": "296240471f49770401593f0d154cfd24f58c9d6d196392a1aab324c341577440",
+        "data": "AcDggIEBkQI="
+      },
+      "expectedProjection": {
+        "schemaVersion": 1,
+        "notebook": {
+          "id": "fixture-notebook-v1",
+          "name": "Interoperability fixtures",
+          "createdAt": 1725000000000,
+          "updatedAt": 1725000000200
+        },
+        "notes": [
+          {
+            "id": "note-alpha",
+            "title": "Protocol notes",
+            "content": "Browser edit: A shared line.\n\n- [ ] Validate [[sync]]\n\n> [!note] Portable ⛈️\n",
+            "folderId": "folder-research",
+            "createdAt": 1725000000010,
+            "updatedAt": 1725000000100,
+            "deleted": false,
+            "deletedAt": null
+          },
+          {
+            "id": "note-beta",
+            "title": "Embedded assets",
+            "content": "![[diagram.png]]\n\nSee [the protocol](Protocol%20notes.md#wire-format).\n",
+            "folderId": null,
+            "createdAt": 1725000000020,
+            "updatedAt": 1725000000200,
+            "deleted": true,
+            "deletedAt": 1725000000200
+          },
+          {
+            "id": "note-gamma",
+            "title": "Offline checklist",
+            "content": "- [x] Create state vector\n- [ ] Apply delta\n",
+            "folderId": "folder-research",
+            "createdAt": 1725000000100,
+            "updatedAt": 1725000000100,
+            "deleted": false,
+            "deletedAt": null
+          }
+        ]
+      }
+    },
+    "concurrency": {
+      "leftUpdate": {
+        "encoding": "base64",
+        "byteLength": 22,
+        "sha256": "0731d24fed43096cbb4e67a93433857239ad11f912b8eb56ce47e6608d54c928",
+        "data": "AQHQgMGBAgBEwOCAgQEWBUxFRlQgAA=="
+      },
+      "rightUpdate": {
+        "encoding": "base64",
+        "byteLength": 22,
+        "sha256": "a5f619f82466046fc374ef6ec9cf1afcce3f8d777ced15d9cc39dd1ea0474571",
+        "data": "AQHgoIGCAwCEwOCAgQFUBVJJR0hUAA=="
+      },
+      "mergedState": {
+        "encoding": "base64",
+        "byteLength": 767,
+        "sha256": "ab9a5d2ecef34d969f698a765df6f09d02751a4dc6694d4c73ce122d84300225",
+        "data": "AwHgoIGCAwCEwOCAgQFUBVJJR0hUAdCAwYECAETA4ICBARYFTEVGVCAZwOCAgQEAKAEIbm90ZWJvb2sNc2NoZW1hVmVyc2lvbgF9ASgBCG5vdGVib29rAmlkAXcTZml4dHVyZS1ub3RlYm9vay12MSgBCG5vdGVib29rBG5hbWUBdxlJbnRlcm9wZXJhYmlsaXR5IGZpeHR1cmVzKAEIbm90ZWJvb2sJY3JlYXRlZEF0AXtCeRogMiAAACgBCG5vdGVib29rCXVwZGF0ZWRBdAF7QnkaIDIgAAAnAQVub3Rlcwpub3RlLWFscGhhAScAwOCAgQEFBXRpdGxlAgQAwOCAgQEGDlByb3RvY29sIG5vdGVzJwDA4ICBAQUHY29udGVudAIEAMDggIEBFUNBIHNoYXJlZCBsaW5lLgoKLSBbIF0gVmFsaWRhdGUgW1tzeW5jXV0KCj4gWyFub3RlXSBQb3J0YWJsZSDim4jvuI8KKADA4ICBAQUIZm9sZGVySWQBdw9mb2xkZXItcmVzZWFyY2goAMDggIEBBQljcmVhdGVkQXQBe0J5GiAyIKAAKADA4ICBAQUJdXBkYXRlZEF0AXtCeRogMiCgACgAwOCAgQEFB2RlbGV0ZWQBeSgAwOCAgQEFCWRlbGV0ZWRBdAF+JwEFbm90ZXMJbm90ZS1iZXRhAScAwOCAgQFaBXRpdGxlAgQAwOCAgQFbD0VtYmVkZGVkIGFzc2V0cycAwOCAgQFaB2NvbnRlbnQCBADA4ICBAWtHIVtbZGlhZ3JhbS5wbmddXQoKU2VlIFt0aGUgcHJvdG9jb2xdKFByb3RvY29sJTIwbm90ZXMubWQjd2lyZS1mb3JtYXQpLgooAMDggIEBWghmb2xkZXJJZAF+KADA4ICBAVoJY3JlYXRlZEF0AXtCeRogMiFAACgAwOCAgQFaCXVwZGF0ZWRBdAF7QnkaIDIhQAAoAMDggIEBWgdkZWxldGVkAXkoAMDggIEBWglkZWxldGVkQXQBfgA="
+      },
+      "mergedStateVector": {
+        "encoding": "base64",
+        "byteLength": 20,
+        "sha256": "99fa5c9a111552ae411958721788e14d0d07c9451d5c7bdfb0dcb98fc581e858",
+        "data": "A+CggYIDBdCAwYECBcDggIEBuAE="
+      },
+      "expectedProjection": {
+        "schemaVersion": 1,
+        "notebook": {
+          "id": "fixture-notebook-v1",
+          "name": "Interoperability fixtures",
+          "createdAt": 1725000000000,
+          "updatedAt": 1725000000000
+        },
+        "notes": [
+          {
+            "id": "note-alpha",
+            "title": "Protocol notes",
+            "content": "LEFT A shared line.\n\n- [ ] Validate [[sync]]\n\n> [!note] Portable ⛈️\nRIGHT",
+            "folderId": "folder-research",
+            "createdAt": 1725000000010,
+            "updatedAt": 1725000000010,
+            "deleted": false,
+            "deletedAt": null
+          },
+          {
+            "id": "note-beta",
+            "title": "Embedded assets",
+            "content": "![[diagram.png]]\n\nSee [the protocol](Protocol%20notes.md#wire-format).\n",
+            "folderId": null,
+            "createdAt": 1725000000020,
+            "updatedAt": 1725000000020,
+            "deleted": false,
+            "deletedAt": null
+          }
+        ]
+      }
+    }
+  },
+  "protocol": {
+    "chunkBytes": 64,
+    "updateMessage": {
+      "kind": "update",
+      "notebookId": "fixture-notebook-v1",
+      "messageId": "fixture-update-message",
+      "sentAt": 1725000001000,
+      "requestId": "fixture-request",
+      "targetInboxId": "fixture-target-inbox",
+      "responderStateVector": {
+        "encoding": "base64",
+        "byteLength": 8,
+        "sha256": "24a78061df922bd4df6c27b37025140b7e1dfa0d48c5f4ad51a0554395ef9721",
+        "data": "AcDggIEBjQI="
+      },
+      "payload": {
+        "encoding": "base64",
+        "byteLength": 345,
+        "sha256": "6fa1a36a87515a92a4da28f96e56063ef01e5992d7df72e09ff3e5d20b903873",
+        "data": "AQ3A4ICBAbgBqMDggIEBBAF7QnkaIDImQABEwOCAgQEWDkJyb3dzZXIgZWRpdDogqMDggIEBVwF7QnkaIDImQAAnAQVub3Rlcwpub3RlLWdhbW1hAScAwOCAgQHIAQV0aXRsZQIEAMDggIEByQERT2ZmbGluZSBjaGVja2xpc3QnAMDggIEByAEHY29udGVudAIEAMDggIEB2wEsLSBbeF0gQ3JlYXRlIHN0YXRlIHZlY3RvcgotIFsgXSBBcHBseSBkZWx0YQooAMDggIEByAEIZm9sZGVySWQBdw9mb2xkZXItcmVzZWFyY2goAMDggIEByAEJY3JlYXRlZEF0AXtCeRogMiZAACgAwOCAgQHIAQl1cGRhdGVkQXQBe0J5GiAyJkAAKADA4ICBAcgBB2RlbGV0ZWQBeSgAwOCAgQHIAQlkZWxldGVkQXQBfgHA4ICBAQIEAVcB"
+      }
+    },
+    "updateChunks": [
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-update-message\",\"sentAt\":1725000001000,\"chunkIndex\":0,\"chunkCount\":6,\"totalBytes\":345,\"payload\":\"AQ3A4ICBAbgBqMDggIEBBAF7QnkaIDImQABEwOCAgQEWDkJyb3dzZXIgZWRpdDogqMDggIEBVwF7QnkaIDImQA==\",\"kind\":\"update\",\"requestId\":\"fixture-request\",\"targetInboxId\":\"fixture-target-inbox\",\"responderStateVector\":\"AcDggIEBjQI=\"}",
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-update-message\",\"sentAt\":1725000001000,\"chunkIndex\":1,\"chunkCount\":6,\"totalBytes\":345,\"payload\":\"ACcBBW5vdGVzCm5vdGUtZ2FtbWEBJwDA4ICBAcgBBXRpdGxlAgQAwOCAgQHJARFPZmZsaW5lIGNoZWNrbGlzdA==\",\"kind\":\"update\",\"requestId\":\"fixture-request\",\"targetInboxId\":\"fixture-target-inbox\",\"responderStateVector\":\"AcDggIEBjQI=\"}",
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-update-message\",\"sentAt\":1725000001000,\"chunkIndex\":2,\"chunkCount\":6,\"totalBytes\":345,\"payload\":\"JwDA4ICBAcgBB2NvbnRlbnQCBADA4ICBAdsBLC0gW3hdIENyZWF0ZSBzdGF0ZSB2ZWN0b3IKLSBbIF0gQXBwbA==\",\"kind\":\"update\",\"requestId\":\"fixture-request\",\"targetInboxId\":\"fixture-target-inbox\",\"responderStateVector\":\"AcDggIEBjQI=\"}",
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-update-message\",\"sentAt\":1725000001000,\"chunkIndex\":3,\"chunkCount\":6,\"totalBytes\":345,\"payload\":\"eSBkZWx0YQooAMDggIEByAEIZm9sZGVySWQBdw9mb2xkZXItcmVzZWFyY2goAMDggIEByAEJY3JlYXRlZEF0AQ==\",\"kind\":\"update\",\"requestId\":\"fixture-request\",\"targetInboxId\":\"fixture-target-inbox\",\"responderStateVector\":\"AcDggIEBjQI=\"}",
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-update-message\",\"sentAt\":1725000001000,\"chunkIndex\":4,\"chunkCount\":6,\"totalBytes\":345,\"payload\":\"e0J5GiAyJkAAKADA4ICBAcgBCXVwZGF0ZWRBdAF7QnkaIDImQAAoAMDggIEByAEHZGVsZXRlZAF5KADA4ICBAQ==\",\"kind\":\"update\",\"requestId\":\"fixture-request\",\"targetInboxId\":\"fixture-target-inbox\",\"responderStateVector\":\"AcDggIEBjQI=\"}",
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-update-message\",\"sentAt\":1725000001000,\"chunkIndex\":5,\"chunkCount\":6,\"totalBytes\":345,\"payload\":\"yAEJZGVsZXRlZEF0AX4BwOCAgQECBAFXAQ==\",\"kind\":\"update\",\"requestId\":\"fixture-request\",\"targetInboxId\":\"fixture-target-inbox\",\"responderStateVector\":\"AcDggIEBjQI=\"}"
+    ],
+    "updateDeliveryOrder": [
+      2,
+      0,
+      2,
+      5,
+      4,
+      3,
+      1
+    ],
+    "syncRequestMessage": {
+      "kind": "sync-request",
+      "notebookId": "fixture-notebook-v1",
+      "messageId": "fixture-sync-request-message",
+      "sentAt": 1725000001100,
+      "requestId": "fixture-request",
+      "targetInboxId": "fixture-target-inbox",
+      "stateVector": {
+        "encoding": "base64",
+        "byteLength": 8,
+        "sha256": "2cb85ecef73949d59cb474e038bdc60a32b68007112805d79f645c146a2cc9da",
+        "data": "AcDggIEBuAE="
+      }
+    },
+    "syncRequestChunks": [
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-sync-request-message\",\"sentAt\":1725000001100,\"chunkIndex\":0,\"chunkCount\":1,\"totalBytes\":8,\"payload\":\"AcDggIEBuAE=\",\"kind\":\"sync-request\",\"requestId\":\"fixture-request\",\"targetInboxId\":\"fixture-target-inbox\"}"
+    ],
+    "snapshotMessage": {
+      "kind": "snapshot",
+      "notebookId": "fixture-notebook-v1",
+      "messageId": "fixture-snapshot-message",
+      "sentAt": 1725000001200,
+      "requestId": "fixture-snapshot-request",
+      "targetInboxId": "fixture-target-inbox",
+      "payload": {
+        "encoding": "base64",
+        "byteLength": 727,
+        "sha256": "649ef4175429637a913ffb4c2bed0bbf7e97a679efe39d48be85de51e2a3169e",
+        "data": "ARnA4ICBAQAoAQhub3RlYm9vaw1zY2hlbWFWZXJzaW9uAX0BKAEIbm90ZWJvb2sCaWQBdxNmaXh0dXJlLW5vdGVib29rLXYxKAEIbm90ZWJvb2sEbmFtZQF3GUludGVyb3BlcmFiaWxpdHkgZml4dHVyZXMoAQhub3RlYm9vawljcmVhdGVkQXQBe0J5GiAyIAAAKAEIbm90ZWJvb2sJdXBkYXRlZEF0AXtCeRogMiAAACcBBW5vdGVzCm5vdGUtYWxwaGEBJwDA4ICBAQUFdGl0bGUCBADA4ICBAQYOUHJvdG9jb2wgbm90ZXMnAMDggIEBBQdjb250ZW50AgQAwOCAgQEVQ0Egc2hhcmVkIGxpbmUuCgotIFsgXSBWYWxpZGF0ZSBbW3N5bmNdXQoKPiBbIW5vdGVdIFBvcnRhYmxlIOKbiO+4jwooAMDggIEBBQhmb2xkZXJJZAF3D2ZvbGRlci1yZXNlYXJjaCgAwOCAgQEFCWNyZWF0ZWRBdAF7QnkaIDIgoAAoAMDggIEBBQl1cGRhdGVkQXQBe0J5GiAyIKAAKADA4ICBAQUHZGVsZXRlZAF5KADA4ICBAQUJZGVsZXRlZEF0AX4nAQVub3Rlcwlub3RlLWJldGEBJwDA4ICBAVoFdGl0bGUCBADA4ICBAVsPRW1iZWRkZWQgYXNzZXRzJwDA4ICBAVoHY29udGVudAIEAMDggIEBa0chW1tkaWFncmFtLnBuZ11dCgpTZWUgW3RoZSBwcm90b2NvbF0oUHJvdG9jb2wlMjBub3Rlcy5tZCN3aXJlLWZvcm1hdCkuCigAwOCAgQFaCGZvbGRlcklkAX4oAMDggIEBWgljcmVhdGVkQXQBe0J5GiAyIUAAKADA4ICBAVoJdXBkYXRlZEF0AXtCeRogMiFAACgAwOCAgQFaB2RlbGV0ZWQBeSgAwOCAgQFaCWRlbGV0ZWRBdAF+AA=="
+      }
+    },
+    "snapshotChunks": [
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-snapshot-message\",\"sentAt\":1725000001200,\"chunkIndex\":0,\"chunkCount\":12,\"totalBytes\":727,\"payload\":\"ARnA4ICBAQAoAQhub3RlYm9vaw1zY2hlbWFWZXJzaW9uAX0BKAEIbm90ZWJvb2sCaWQBdxNmaXh0dXJlLW5vdA==\",\"kind\":\"snapshot\",\"requestId\":\"fixture-snapshot-request\",\"targetInboxId\":\"fixture-target-inbox\"}",
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-snapshot-message\",\"sentAt\":1725000001200,\"chunkIndex\":1,\"chunkCount\":12,\"totalBytes\":727,\"payload\":\"ZWJvb2stdjEoAQhub3RlYm9vawRuYW1lAXcZSW50ZXJvcGVyYWJpbGl0eSBmaXh0dXJlcygBCG5vdGVib29rCQ==\",\"kind\":\"snapshot\",\"requestId\":\"fixture-snapshot-request\",\"targetInboxId\":\"fixture-target-inbox\"}",
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-snapshot-message\",\"sentAt\":1725000001200,\"chunkIndex\":2,\"chunkCount\":12,\"totalBytes\":727,\"payload\":\"Y3JlYXRlZEF0AXtCeRogMiAAACgBCG5vdGVib29rCXVwZGF0ZWRBdAF7QnkaIDIgAAAnAQVub3Rlcwpub3RlLQ==\",\"kind\":\"snapshot\",\"requestId\":\"fixture-snapshot-request\",\"targetInboxId\":\"fixture-target-inbox\"}",
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-snapshot-message\",\"sentAt\":1725000001200,\"chunkIndex\":3,\"chunkCount\":12,\"totalBytes\":727,\"payload\":\"YWxwaGEBJwDA4ICBAQUFdGl0bGUCBADA4ICBAQYOUHJvdG9jb2wgbm90ZXMnAMDggIEBBQdjb250ZW50AgQAwA==\",\"kind\":\"snapshot\",\"requestId\":\"fixture-snapshot-request\",\"targetInboxId\":\"fixture-target-inbox\"}",
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-snapshot-message\",\"sentAt\":1725000001200,\"chunkIndex\":4,\"chunkCount\":12,\"totalBytes\":727,\"payload\":\"4ICBARVDQSBzaGFyZWQgbGluZS4KCi0gWyBdIFZhbGlkYXRlIFtbc3luY11dCgo+IFshbm90ZV0gUG9ydGFibA==\",\"kind\":\"snapshot\",\"requestId\":\"fixture-snapshot-request\",\"targetInboxId\":\"fixture-target-inbox\"}",
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-snapshot-message\",\"sentAt\":1725000001200,\"chunkIndex\":5,\"chunkCount\":12,\"totalBytes\":727,\"payload\":\"ZSDim4jvuI8KKADA4ICBAQUIZm9sZGVySWQBdw9mb2xkZXItcmVzZWFyY2goAMDggIEBBQljcmVhdGVkQXQBew==\",\"kind\":\"snapshot\",\"requestId\":\"fixture-snapshot-request\",\"targetInboxId\":\"fixture-target-inbox\"}",
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-snapshot-message\",\"sentAt\":1725000001200,\"chunkIndex\":6,\"chunkCount\":12,\"totalBytes\":727,\"payload\":\"QnkaIDIgoAAoAMDggIEBBQl1cGRhdGVkQXQBe0J5GiAyIKAAKADA4ICBAQUHZGVsZXRlZAF5KADA4ICBAQUJZA==\",\"kind\":\"snapshot\",\"requestId\":\"fixture-snapshot-request\",\"targetInboxId\":\"fixture-target-inbox\"}",
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-snapshot-message\",\"sentAt\":1725000001200,\"chunkIndex\":7,\"chunkCount\":12,\"totalBytes\":727,\"payload\":\"ZWxldGVkQXQBficBBW5vdGVzCW5vdGUtYmV0YQEnAMDggIEBWgV0aXRsZQIEAMDggIEBWw9FbWJlZGRlZCBhcw==\",\"kind\":\"snapshot\",\"requestId\":\"fixture-snapshot-request\",\"targetInboxId\":\"fixture-target-inbox\"}",
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-snapshot-message\",\"sentAt\":1725000001200,\"chunkIndex\":8,\"chunkCount\":12,\"totalBytes\":727,\"payload\":\"c2V0cycAwOCAgQFaB2NvbnRlbnQCBADA4ICBAWtHIVtbZGlhZ3JhbS5wbmddXQoKU2VlIFt0aGUgcHJvdG9jbw==\",\"kind\":\"snapshot\",\"requestId\":\"fixture-snapshot-request\",\"targetInboxId\":\"fixture-target-inbox\"}",
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-snapshot-message\",\"sentAt\":1725000001200,\"chunkIndex\":9,\"chunkCount\":12,\"totalBytes\":727,\"payload\":\"bF0oUHJvdG9jb2wlMjBub3Rlcy5tZCN3aXJlLWZvcm1hdCkuCigAwOCAgQFaCGZvbGRlcklkAX4oAMDggIEBWg==\",\"kind\":\"snapshot\",\"requestId\":\"fixture-snapshot-request\",\"targetInboxId\":\"fixture-target-inbox\"}",
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-snapshot-message\",\"sentAt\":1725000001200,\"chunkIndex\":10,\"chunkCount\":12,\"totalBytes\":727,\"payload\":\"CWNyZWF0ZWRBdAF7QnkaIDIhQAAoAMDggIEBWgl1cGRhdGVkQXQBe0J5GiAyIUAAKADA4ICBAVoHZGVsZXRlZA==\",\"kind\":\"snapshot\",\"requestId\":\"fixture-snapshot-request\",\"targetInboxId\":\"fixture-target-inbox\"}",
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-snapshot-message\",\"sentAt\":1725000001200,\"chunkIndex\":11,\"chunkCount\":12,\"totalBytes\":727,\"payload\":\"AXkoAMDggIEBWglkZWxldGVkQXQBfgA=\",\"kind\":\"snapshot\",\"requestId\":\"fixture-snapshot-request\",\"targetInboxId\":\"fixture-target-inbox\"}"
+    ],
+    "manifestMessage": {
+      "kind": "manifest",
+      "notebookId": "fixture-notebook-v1",
+      "messageId": "fixture-manifest-message",
+      "sentAt": 1725000001300,
+      "notebookName": "Interoperability fixtures",
+      "schemaVersion": 1,
+      "ownerInboxId": "fixture-owner-inbox"
+    },
+    "manifestChunks": [
+      "stormdance-sync/1\n{\"protocol\":\"storm.dance/yjs\",\"version\":1,\"notebookId\":\"fixture-notebook-v1\",\"messageId\":\"fixture-manifest-message\",\"sentAt\":1725000001300,\"chunkIndex\":0,\"chunkCount\":1,\"totalBytes\":0,\"payload\":\"\",\"kind\":\"manifest\",\"notebookName\":\"Interoperability fixtures\",\"schemaVersion\":1,\"ownerInboxId\":\"fixture-owner-inbox\"}"
+    ]
+  }
+}

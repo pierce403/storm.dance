@@ -1,0 +1,30 @@
+{
+  "name": "storm-dance",
+  "version": "0.2.0",
+  "description": "Filesystem-first XMTP and Yjs synchronization for storm.dance notebooks",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pierce403/storm.dance.git"
+  },
+  "homepage": "https://storm.dance",
+  "type": "module",
+  "bin": {
+    "stormdance": "dist/cli/index.js"
+  },
+  "files": [
+    "dist/**",
+    "README.md",
+    "LICENSE",
+    "SYNC_PROTOCOL.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@xmtp/node-sdk": "6.1.0",
+    "ethers": "6.17.0",
+    "yjs": "13.6.31",
+    "zod": "3.24.2"
+  }
+}

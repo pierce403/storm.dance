@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { XmtpStatusIndicator } from '../components/xmtp/XmtpStatusIndicator';
 import { IpfsStatusIndicator } from '../components/ipfs/IpfsStatusIndicator';
 import { Info, Keyboard, Sun, Moon, Upload } from 'lucide-react';
@@ -11,6 +11,15 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import {
+  getNativeRuntimeStatus,
+  listenForNativeSyncStatus,
+  pickNativeDirectory,
+  startNativeWatch,
+  stopNativeWatch,
+  type NativeRuntimeStatus,
+  type NativeSyncStatus,
+} from '@/lib/nativeBridge';
 
 interface TopBarProps {
   theme: 'light' | 'dark';
@@ -50,6 +59,80 @@ export function TopBar({
   setDebugLoggingEnabled,
 }: TopBarProps) {
   const [showHotkeys, setShowHotkeys] = useState(false);
+  const [runtimeStatus, setRuntimeStatus] = useState<NativeRuntimeStatus | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [nativeSyncStatus, setNativeSyncStatus] = useState<NativeSyncStatus | null>(null);
+  const [nativeOperationPending, setNativeOperationPending] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void getNativeRuntimeStatus().then((status) => {
+      if (active) setRuntimeStatus(status);
+    }).catch((error: unknown) => {
+      if (!active) return;
+      setRuntimeError(error instanceof Error ? error.message : 'Native runtime probe failed');
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (runtimeStatus?.runtime !== 'desktop') return;
+    let active = true;
+    let unsubscribe: (() => void) | undefined;
+    void listenForNativeSyncStatus((status) => {
+      if (!active) return;
+      setNativeSyncStatus(status);
+      setRuntimeStatus((current) => {
+        if (!current || current.runtime !== 'desktop') return current;
+        const watched = new Set(current.watchedDirectories);
+        if (status.state === 'watching') watched.add(status.directory);
+        if (status.state === 'stopped') watched.delete(status.directory);
+        return { ...current, watchedDirectories: [...watched].sort() };
+      });
+    }).then((stopListening) => {
+      if (active) unsubscribe = stopListening;
+      else stopListening();
+    }).catch((error: unknown) => {
+      if (active) setRuntimeError(error instanceof Error ? error.message : 'Native status listener failed');
+    });
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, [runtimeStatus?.runtime]);
+
+  const watchNativeVault = async () => {
+    setNativeOperationPending(true);
+    setRuntimeError(null);
+    try {
+      const directory = await pickNativeDirectory();
+      if (!directory) return;
+      const status = await startNativeWatch(directory);
+      setNativeSyncStatus(status);
+      const refreshed = await getNativeRuntimeStatus();
+      setRuntimeStatus(refreshed);
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : 'Could not watch the linked vault');
+    } finally {
+      setNativeOperationPending(false);
+    }
+  };
+
+  const stopWatchingNativeVault = async (directory: string) => {
+    setNativeOperationPending(true);
+    setRuntimeError(null);
+    try {
+      const status = await stopNativeWatch(directory);
+      setNativeSyncStatus(status);
+      setRuntimeStatus(await getNativeRuntimeStatus());
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : 'Could not stop the linked vault');
+    } finally {
+      setNativeOperationPending(false);
+    }
+  };
   const buildDate = new Date(__APP_BUILD_TIME__);
   const buildTimeLabel = Number.isNaN(buildDate.getTime())
     ? __APP_BUILD_TIME__
@@ -122,7 +205,61 @@ export function TopBar({
                     shortCommitSha
                   )}
                 </dd>
+                <dt className="font-medium text-gray-600 dark:text-gray-300">Runtime</dt>
+                <dd className="font-mono text-gray-900 dark:text-gray-100">
+                  {runtimeStatus?.runtime === 'desktop' ? 'Tauri desktop' : 'Web browser'}
+                </dd>
+                <dt className="font-medium text-gray-600 dark:text-gray-300">Native sync</dt>
+                <dd className="break-all font-mono text-gray-900 dark:text-gray-100">
+                  {runtimeError
+                    ? `Unavailable: ${runtimeError}`
+                    : runtimeStatus?.runtime === 'desktop'
+                      ? `${runtimeStatus.watchedDirectories.length} watched ${runtimeStatus.watchedDirectories.length === 1 ? 'vault' : 'vaults'} · ${runtimeStatus.platform}`
+                      : 'Not required for web collaboration'}
+                </dd>
               </dl>
+              {runtimeStatus?.runtime === 'desktop' && (
+                <section className="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700" aria-label="Native Markdown vault sync">
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">Markdown vaults</h3>
+                    <p className="text-xs text-gray-600 dark:text-gray-300">
+                      Choose a directory already linked with the stormdance CLI. Ordinary Markdown edits then join this desktop XMTP session.
+                    </p>
+                  </div>
+                  {runtimeStatus.watchedDirectories.length > 0 && (
+                    <ul className="space-y-2 text-xs">
+                      {runtimeStatus.watchedDirectories.map((directory) => (
+                        <li key={directory} className="flex items-center justify-between gap-2">
+                          <span className="min-w-0 break-all font-mono text-gray-700 dark:text-gray-200">{directory}</span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={nativeOperationPending}
+                            onClick={() => void stopWatchingNativeVault(directory)}
+                          >
+                            Stop
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={nativeOperationPending}
+                    onClick={() => void watchNativeVault()}
+                  >
+                    {nativeOperationPending ? 'Working…' : 'Watch linked vault'}
+                  </Button>
+                  {nativeSyncStatus?.detail && (
+                    <p role="status" className="text-xs text-gray-600 dark:text-gray-300">
+                      {nativeSyncStatus.detail}
+                    </p>
+                  )}
+                </section>
+              )}
             </DialogContent>
           </Dialog>
         </div>

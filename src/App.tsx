@@ -14,6 +14,10 @@ import { rebaseStringEdit, type NotebookCrdtProjection } from './lib/collaborati
 import { normalizeConversationId } from './lib/collaboration/bindings';
 import { CollaborationInviteModal } from './components/collaboration/CollaborationInviteModal';
 import { IdentityUtils } from './utils/identity';
+import {
+  decodeNativeCrdtUpdate,
+  listenForNativeCrdtUpdates,
+} from './lib/nativeBridge';
 
 // --- Types for Import --- 
 interface ExportedFolder {
@@ -383,6 +387,7 @@ function App() {
     broadcastLocalUpdate,
     broadcastLocalDelete,
     broadcastNotebookRename,
+    applyNativeUpdate,
     inviteModalOpen,
     inviteDetails,
     acceptInvite,
@@ -395,6 +400,31 @@ function App() {
     onNotebookUpdated: handleCollaborativeNotebookUpdated,
     debugLoggingEnabled: debugLoggingEnabled,
   });
+
+  useEffect(() => {
+    let active = true;
+    let unsubscribe: (() => void) | undefined;
+    void listenForNativeCrdtUpdates((nativeUpdate) => {
+      if (!active) return;
+      try {
+        const update = decodeNativeCrdtUpdate(nativeUpdate.updateBase64);
+        void applyNativeUpdate(nativeUpdate, update).catch((error) => {
+          console.warn('Could not apply a native Markdown vault update', error);
+        });
+      } catch (error) {
+        console.warn('Rejected an invalid native Markdown vault update', error);
+      }
+    }).then((stopListening) => {
+      if (active) unsubscribe = stopListening;
+      else stopListening();
+    }).catch((error) => {
+      if (debugLoggingEnabled) console.warn('Could not subscribe to native vault updates', error);
+    });
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, [applyNativeUpdate, debugLoggingEnabled]);
 
   const getNoteById = (id: string | null): Note | null => {
     if (!id) return null;

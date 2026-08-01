@@ -10,9 +10,12 @@ lerna-debug.log*
 node_modules
 dist
 dist-cli
+artifacts
 dist-ssr
 playwright-report
 test-results
+target
+src-tauri/target
 *.local
 
 # Editor directories and files

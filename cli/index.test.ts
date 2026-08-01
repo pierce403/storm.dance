@@ -138,10 +138,13 @@ describe('stormdance notebook commands', () => {
     );
 
     expect(sharedGroup.allow).toHaveBeenCalledOnce();
-    expect(writeConfig).toHaveBeenCalledWith('/workspace/notes', linkedConfig());
+    expect(writeConfig).toHaveBeenCalledWith('/workspace/notes', {
+      ...linkedConfig(),
+      expectedInboxId: 'cli-inbox',
+    });
     expect(sync).toHaveBeenCalledWith(expect.objectContaining({
       rootDirectory: '/workspace/notes',
-      config: linkedConfig(),
+      config: { ...linkedConfig(), expectedInboxId: 'cli-inbox' },
       inboxId: 'cli-inbox',
     }));
     expect(stdout.text()).toContain('Linked /workspace/notes to notebook-1 (conversation-1).');

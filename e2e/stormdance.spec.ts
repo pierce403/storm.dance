@@ -444,9 +444,13 @@ test.describe('storm.dance UX smoke checks', () => {
     await expect(appInfo).toBeVisible();
     await expect(appInfo).toContainText('local-first note-taking app');
     await expect(appInfo).toContainText('Version');
-    await expect(appInfo).toContainText('0.0.1');
+    await expect(appInfo).toContainText('0.2.0');
     await expect(appInfo).toContainText('Build time');
     await expect(appInfo).toContainText('Commit');
+    await expect(appInfo).toContainText('Runtime');
+    await expect(appInfo).toContainText('Web browser');
+    await expect(appInfo).toContainText('Native sync');
+    await expect(appInfo).toContainText('Not required for web collaboration');
     await expect(appInfo.getByRole('link', { name: /^[0-9a-f]{7}$/ })).toHaveAttribute(
       'href',
       /^https:\/\/github\.com\/pierce403\/storm\.dance\/commit\/[0-9a-f]{40}$/,

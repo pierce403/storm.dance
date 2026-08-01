@@ -1,26 +1,51 @@
 import { z } from 'zod';
+import {
+  DEFAULT_PROTOCOL_CHUNK_BYTES,
+  MAX_PROTOCOL_CHUNKS,
+  MAX_PROTOCOL_CHUNK_BYTES,
+  MAX_PROTOCOL_ID_BYTES,
+  MAX_PROTOCOL_NAME_BYTES,
+  MAX_PROTOCOL_PAYLOAD_BYTES,
+  MAX_PROTOCOL_WIRE_CHARS,
+  STORMDANCE_PROTOCOL,
+  STORMDANCE_PROTOCOL_PREFIX,
+  STORMDANCE_PROTOCOL_VERSION,
+} from './compatibility.js';
 
-export const STORMDANCE_PROTOCOL = 'storm.dance/yjs';
-export const STORMDANCE_PROTOCOL_VERSION = 1;
-export const STORMDANCE_PROTOCOL_PREFIX = 'stormdance-sync/1\n';
+export {
+  DEFAULT_PROTOCOL_CHUNK_BYTES,
+  MAX_PROTOCOL_CHUNKS,
+  MAX_PROTOCOL_CHUNK_BYTES,
+  MAX_PROTOCOL_PAYLOAD_BYTES,
+  MAX_PROTOCOL_WIRE_CHARS,
+  STORMDANCE_PROTOCOL,
+  STORMDANCE_PROTOCOL_PREFIX,
+  STORMDANCE_PROTOCOL_VERSION,
+} from './compatibility.js';
 
-export const DEFAULT_PROTOCOL_CHUNK_BYTES = 256 * 1024;
-export const MAX_PROTOCOL_CHUNK_BYTES = 512 * 1024;
-export const MAX_PROTOCOL_CHUNKS = 128;
-export const MAX_PROTOCOL_PAYLOAD_BYTES = 32 * 1024 * 1024;
-export const MAX_PROTOCOL_WIRE_CHARS = 800_000;
-
-const MAX_ID_LENGTH = 256;
-const MAX_NAME_LENGTH = 512;
+const MAX_ID_LENGTH = MAX_PROTOCOL_ID_BYTES;
+const MAX_NAME_LENGTH = MAX_PROTOCOL_NAME_BYTES;
 
 const boundedString = (label: string, max = MAX_ID_LENGTH) =>
-  z.string().min(1, `${label} is required`).max(max, `${label} is too long`);
+  z.string()
+    .min(1, `${label} is required`)
+    .refine(
+      (value) => new TextEncoder().encode(value).byteLength <= max,
+      `${label} is too long`,
+    );
 
 const base64Schema = z.string().max(Math.ceil(MAX_PROTOCOL_CHUNK_BYTES / 3) * 4 + 4).refine(
   (value) => {
     if (value.length === 0) return true;
     if (value.length % 4 !== 0) return false;
-    return /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value);
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+      return false;
+    }
+    try {
+      return btoa(atob(value)) === value;
+    } catch {
+      return false;
+    }
   },
   'payload must be canonical base64',
 );

@@ -1,0 +1,212 @@
+name: Native desktop and CLI packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ["desktop-v*"]
+    paths:
+      - ".github/workflows/desktop.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "cli/**"
+      - "crates/**"
+      - "packages/cli/**"
+      - "scripts/stage-cli-package.mjs"
+      - "src-tauri/**"
+      - "src/**"
+      - "public/**"
+      - "index.html"
+      - "package.json"
+      - "package-lock.json"
+      - "components.json"
+      - "LICENSE"
+      - "README.md"
+      - "SYNC_PROTOCOL.md"
+      - "postcss.config.*"
+      - "tailwind.config.*"
+      - "tsconfig*.json"
+      - "vite.config.ts"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x86_64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: appimage,deb,rpm
+          - label: windows-x86_64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: msi,nsis
+          - label: macos-aarch64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            bundles: dmg
+          - label: macos-x86_64
+            runner: macos-latest
+            target: x86_64-apple-darwin
+            bundles: dmg
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            rpm \
+            wget
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Package XMTP-capable Node CLI
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          npm run package:cli
+          (cd artifacts && sha256sum storm-dance-*.tgz > stormdance-cli-node-xmtp.sha256)
+
+      - name: Upload XMTP-capable Node CLI
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: stormdance-cli-node-xmtp
+          path: |
+            artifacts/storm-dance-*.tgz
+            artifacts/stormdance-cli-node-xmtp.sha256
+          if-no-files-found: error
+
+      - name: Test native workspace
+        run: cargo test --workspace --locked
+
+      - name: Build native CLI
+        run: cargo build --locked --release --package storm-cli --target ${{ matrix.target }}
+
+      - name: Smoke-test native CLI lifecycle
+        if: runner.os != 'macOS'
+        shell: bash
+        run: |
+          executable="target/${{ matrix.target }}/release/stormdance"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then executable="${executable}.exe"; fi
+          runner_temp="${RUNNER_TEMP//\\//}"
+          smoke_root="$runner_temp/stormdance-native-smoke-${{ matrix.label }}"
+          mkdir -p "$smoke_root/vault"
+          "$executable" --help
+          STORMDANCE_HOME="$smoke_root/home" "$executable" --json auth init --profile smoke
+          STORMDANCE_HOME="$smoke_root/home" "$executable" --json link smoke-notebook "$smoke_root/vault" --profile smoke --name "Smoke notebook"
+          STORMDANCE_HOME="$smoke_root/home" "$executable" --json sync "$smoke_root/vault"
+          STORMDANCE_HOME="$smoke_root/home" "$executable" --json doctor "$smoke_root/vault"
+
+      - name: Verify macOS native CLI architecture
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          file "target/${{ matrix.target }}/release/stormdance"
+          if [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
+            lipo -verify_arch arm64 "target/${{ matrix.target }}/release/stormdance"
+          else
+            lipo -verify_arch x86_64 "target/${{ matrix.target }}/release/stormdance"
+          fi
+
+      - name: Archive native CLI
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          stage="artifact-stage-${{ matrix.label }}"
+          archive="stormdance-native-local-only-${{ matrix.label }}.tar.gz"
+          mkdir -p "$stage"
+          install -m 0755 "target/${{ matrix.target }}/release/stormdance" "$stage/stormdance"
+          cp LICENSE README.md SYNC_PROTOCOL.md "$stage/"
+          tar -C "$stage" -czf "$archive" .
+          shasum -a 256 "$archive" > "$archive.sha256"
+
+      - name: Archive native CLI for Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $stage = "artifact-stage-${{ matrix.label }}"
+          $archive = "stormdance-native-local-only-${{ matrix.label }}.zip"
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/stormdance.exe" "$stage/stormdance.exe"
+          Copy-Item LICENSE,README.md,SYNC_PROTOCOL.md $stage
+          Compress-Archive -Path "$stage/*" -DestinationPath $archive
+          $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          "$hash  $archive" | Set-Content -Encoding ascii "$archive.sha256"
+
+      - name: Upload native CLI
+        uses: actions/upload-artifact@v7
+        with:
+          name: stormdance-native-local-only-${{ matrix.label }}
+          path: stormdance-native-local-only-${{ matrix.label }}.*
+          if-no-files-found: error
+
+      # Empty signing/notarization secrets intentionally produce unsigned development
+      # bundles. Configure these repository secrets before promoting packages as signed.
+      - name: Build desktop installers
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+        with:
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: stormdance-desktop-${{ matrix.label }}-[bundle]
+          tagName: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && format('storm.dance desktop {0}', github.ref_name) || '' }}
+          releaseBody: "Unsigned development installers, the XMTP-capable Node CLI, and explicitly local-only native CLI archives. Configure platform signing secrets before production distribution."
+          releaseDraft: true
+          retryAttempts: 1
+
+      - name: Upload CLI archives to tagged draft release
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          files=(stormdance-native-local-only-${{ matrix.label }}.*)
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            files+=(artifacts/storm-dance-*.tgz artifacts/stormdance-cli-node-xmtp.sha256)
+          fi
+          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
