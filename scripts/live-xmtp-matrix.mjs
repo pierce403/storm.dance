@@ -19,14 +19,6 @@ import { parseMirrorNote } from '../dist-cli/cli/markdown.js';
 import { LINK_CONFIG_SCHEMA, NotebookDirectorySync } from '../dist-cli/cli/sync.js';
 import { adaptXmtpGroup } from '../dist-cli/cli/xmtp.js';
 
-const enabled = process.env.STORMDANCE_LIVE_XMTP === '1';
-if (!enabled) {
-  console.error('Refusing to run a live network test without STORMDANCE_LIVE_XMTP=1.');
-  process.exitCode = 2;
-} else {
-  await run();
-}
-
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 async function retry(label, operation, attempts = 60, intervalMs = 1_000) {
@@ -445,4 +437,11 @@ async function run() {
     await Promise.allSettled(clients.map((client) => client.close()));
     await rm(root, { recursive: true, force: true });
   }
+}
+
+if (process.env.STORMDANCE_LIVE_XMTP !== '1') {
+  console.error('Refusing to run a live network test without STORMDANCE_LIVE_XMTP=1.');
+  process.exitCode = 2;
+} else {
+  await run();
 }
