@@ -3,14 +3,16 @@ import { Sidebar, SidebarHandle } from './components/notes/Sidebar';
 import { Editor } from './components/notes/Editor';
 import { EditorTabs } from './components/notes/EditorTabs';
 import { Note, Notebook, Folder, dbService, DB_NAME } from './lib/db';
-import type { BrowserClient } from '@/lib/xmtp-browser-sdk';
+import { createBrowserClient, type BrowserClient } from '@/lib/xmtp-browser-sdk';
 import { Key, AlertCircle } from 'lucide-react';
 import './App.css';
 import './DarkTheme.css';
 import { decryptBackup } from './lib/cryptoUtils';
 import { TopBar } from './components/TopBar';
 import { useNotebookCollaboration } from './hooks/useNotebookCollaboration';
-import type { CrdtUpdatePayload } from './lib/collaboration/types';
+import { rebaseStringEdit, type NotebookCrdtProjection } from './lib/collaboration/crdt';
+import { normalizeConversationId } from './lib/collaboration/bindings';
+import { CollaborationInviteModal } from './components/collaboration/CollaborationInviteModal';
 import { IdentityUtils } from './utils/identity';
 
 // --- Types for Import --- 
@@ -34,6 +36,7 @@ interface ExportedData {
 }
 
 type ProgrammaticNoteUpdates = Partial<Pick<Note, 'title' | 'content' | 'folderId'>>;
+type NoteTextBase = Partial<Pick<Note, 'title' | 'content'>>;
 
 interface StormdanceWorkspaceState {
   selectedNotebookId: string | null;
@@ -92,6 +95,14 @@ const storeNullableString = (key: string, value: string | null) => {
     localStorage.removeItem(key);
   }
 };
+
+const getNotebookConversationId = (
+  notebook: Notebook | null | undefined,
+  env: 'dev' | 'production',
+) => normalizeConversationId(notebook?.xmtpBindings?.[env])
+  ?? normalizeConversationId(notebook?.xmtpEnv === env ? notebook?.xmtpTopic : undefined);
+
+const collaborationNoteKey = (notebookId: string, noteId: string) => `${notebookId}\u0000${noteId}`;
 
 // --- Import Password Modal --- 
 const ImportPasswordModal: React.FC<{ fileName: string; onImport: (password: string) => void; onCancel: () => void }> = ({ fileName, onImport, onCancel }) => {
@@ -164,6 +175,46 @@ function App() {
     setHasIdentity(IdentityUtils.hasIdentity());
   }, []);
 
+  const notesColumnRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const editorTitleInputRef = useRef<HTMLInputElement>(null);
+  const editorTextAreaRef = useRef<HTMLTextAreaElement>(null);
+  const sidebarRef = useRef<SidebarHandle>(null);
+  const notebooksListRef = useRef<HTMLUListElement>(null);
+  const notesMutationVersionRef = useRef(0);
+  const selectedNotebookIdRef = useRef(selectedNotebookId);
+  const openNoteIdsRef = useRef(openNoteIds);
+  const activeNoteIdRef = useRef(activeNoteId);
+  const notebooksRef = useRef(notebooks);
+  const notesRef = useRef(notes);
+  const foldersRef = useRef(folders);
+  const noteUpdateQueuesRef = useRef<Map<string, Promise<Note | undefined>>>(new Map());
+  const localNoteRevisionsRef = useRef<Map<string, number>>(new Map());
+  const tombstonedNoteIdsRef = useRef<Set<string>>(new Set());
+  const autoResumeKeyRef = useRef<string | null>(null);
+  const xmtpClientRef = useRef<BrowserClient | null>(null);
+  const isXmtpConnectingRef = useRef(false);
+  const xmtpConnectionGenerationRef = useRef(0);
+
+  const setSelectedNotebookIdAndStore = useCallback((nextNotebookId: string | null) => {
+    selectedNotebookIdRef.current = nextNotebookId;
+    setSelectedNotebookId(nextNotebookId);
+    storeNullableString(WORKSPACE_STORAGE_KEYS.selectedNotebookId, nextNotebookId);
+  }, []);
+
+  const setOpenNoteIdsAndStore = useCallback((nextOpenNoteIds: string[]) => {
+    const uniqueOpenNoteIds = [...new Set(nextOpenNoteIds)];
+    openNoteIdsRef.current = uniqueOpenNoteIds;
+    setOpenNoteIds(uniqueOpenNoteIds);
+    localStorage.setItem(WORKSPACE_STORAGE_KEYS.openNoteIds, JSON.stringify(uniqueOpenNoteIds));
+  }, []);
+
+  const setActiveNoteIdAndStore = useCallback((nextActiveNoteId: string | null) => {
+    activeNoteIdRef.current = nextActiveNoteId;
+    setActiveNoteId(nextActiveNoteId);
+    storeNullableString(WORKSPACE_STORAGE_KEYS.activeNoteId, nextActiveNoteId);
+  }, []);
+
   const handleCreateIdentity = () => {
     console.log("Creating new XMTP identity...");
     const wallet = IdentityUtils.createRandomIdentity();
@@ -189,75 +240,205 @@ function App() {
     document.documentElement.classList.toggle('dark', initialTheme === 'dark');
   }, []);
 
-  const handleRemoteCrdtUpdate = useCallback(async (update: CrdtUpdatePayload) => {
-    if (!notebooks.some(nb => nb.id === update.notebookId)) {
-      return;
-    }
-
-    let noteForDb: Note | null = null;
-    setNotes((prevNotes) => {
-      const existing = prevNotes.find(n => n.id === update.noteId);
-      const merged: Note = existing
-        ? { ...existing, title: update.title, content: update.content, updatedAt: update.updatedAt }
-        : {
-          id: update.noteId,
-          notebookId: update.notebookId,
-          folderId: null,
-          title: update.title,
-          content: update.content,
-          createdAt: update.updatedAt,
-          updatedAt: update.updatedAt,
-        };
-
-      noteForDb = merged;
-      const filtered = prevNotes.filter(n => n.id !== update.noteId);
-      return [...filtered, merged].sort((a, b) => b.updatedAt - a.updatedAt);
+  const handleCollaborativeNotebookUpdated = useCallback((notebook: Notebook) => {
+    const wasAlreadyLocal = notebooksRef.current.some((candidate) => candidate.id === notebook.id);
+    setNotebooks((previous) => {
+      const exists = previous.some((candidate) => candidate.id === notebook.id);
+      const next = exists
+        ? previous.map((candidate) => candidate.id === notebook.id ? notebook : candidate)
+        : [notebook, ...previous];
+      notebooksRef.current = next;
+      return next;
     });
+    if (!wasAlreadyLocal) setSelectedNotebookIdAndStore(notebook.id);
+  }, [setSelectedNotebookIdAndStore]);
 
-    if (noteForDb) {
-      await dbService.upsertExternalNote(noteForDb);
+  const handleRemoteProjection = useCallback(async (projection: NotebookCrdtProjection) => {
+    const notebookId = projection.notebook.id;
+    if (!notebooksRef.current.some((notebook) => notebook.id === notebookId)) return;
+    const localNoteIdsAtProjectionStart = new Set(
+      notesRef.current
+        .filter((note) => note.notebookId === notebookId)
+        .map((note) => note.id),
+    );
+    const projectedNoteIds = new Set(projection.notes.map((note) => note.id));
+    const commitSelectedNotebookNotes = (nextNotes: Note[]) => {
+      if (selectedNotebookIdRef.current !== notebookId) return;
+      const sorted = [...nextNotes].sort((left, right) => right.updatedAt - left.updatedAt);
+      notesRef.current = sorted;
+      setNotes(sorted);
+      const validOpen = openNoteIdsRef.current.filter((id) => sorted.some((note) => note.id === id));
+      if (validOpen.length !== openNoteIdsRef.current.length) setOpenNoteIdsAndStore(validOpen);
+      if (activeNoteIdRef.current && !validOpen.includes(activeNoteIdRef.current)) {
+        setActiveNoteIdAndStore(validOpen[0] || null);
+      }
+    };
+    const projectedLocalRevisions = new Map(
+      projection.notes.map((note) => {
+        const key = collaborationNoteKey(notebookId, note.id);
+        if (note.deleted) tombstonedNoteIdsRef.current.add(key);
+        else tombstonedNoteIdsRef.current.delete(key);
+        return [note.id, localNoteRevisionsRef.current.get(key) ?? 0] as const;
+      }),
+    );
+    // Project into the controlled editor before any IndexedDB await. This
+    // keeps the editor's next full-value change based on the current Yjs text.
+    commitSelectedNotebookNotes(projection.notes
+      .filter((note) => !note.deleted)
+      .map((note) => ({
+        id: note.id,
+        notebookId,
+        folderId: note.folderId,
+        title: note.title,
+        content: note.content,
+        createdAt: note.createdAt,
+        updatedAt: note.updatedAt,
+      })));
+    const existingNotebook = await dbService.getNotebook(notebookId);
+    if (!existingNotebook) return;
+
+    const projectedNotebook: Notebook = {
+      ...existingNotebook,
+      name: projection.notebook.name,
+      createdAt: projection.notebook.createdAt,
+      updatedAt: projection.notebook.updatedAt,
+    };
+    await dbService.createReplicaNotebook(projectedNotebook);
+    handleCollaborativeNotebookUpdated(projectedNotebook);
+
+    const materializedNotes = new Map<string, Note>();
+    for (const projected of projection.notes) {
+      const key = collaborationNoteKey(notebookId, projected.id);
+      const projectedLocalRevision = projectedLocalRevisions.get(projected.id) ?? 0;
+      const previousUpdate = noteUpdateQueuesRef.current.get(key) || Promise.resolve(undefined);
+      const queuedUpdate = previousUpdate
+        .catch(() => undefined)
+        .then(async (): Promise<Note | undefined> => {
+          if (projected.deleted) {
+            await dbService.deleteNote(projected.id, notebookId);
+            return undefined;
+          }
+          if ((localNoteRevisionsRef.current.get(key) ?? 0) !== projectedLocalRevision) {
+            return notesRef.current.find((note) => (
+              note.id === projected.id && note.notebookId === notebookId
+            ));
+          }
+          const note: Note = {
+            id: projected.id,
+            notebookId,
+            folderId: projected.folderId,
+            title: projected.title,
+            content: projected.content,
+            createdAt: projected.createdAt,
+            updatedAt: projected.updatedAt,
+          };
+          await dbService.upsertExternalNote(note);
+          return note;
+        });
+      noteUpdateQueuesRef.current.set(key, queuedUpdate);
+      const materialized = await queuedUpdate;
+      if (materialized) materializedNotes.set(projected.id, materialized);
+      if (noteUpdateQueuesRef.current.get(key) === queuedUpdate) {
+        noteUpdateQueuesRef.current.delete(key);
+      }
     }
-  }, [notebooks]);
+
+    notesMutationVersionRef.current += 1;
+    const currentNotes = notesRef.current;
+    const projectedNotesAfterPersistence = projection.notes
+      .filter((projected) => !projected.deleted)
+      .map((projected) => {
+        const key = collaborationNoteKey(notebookId, projected.id);
+        const revisionChanged = (localNoteRevisionsRef.current.get(key) ?? 0)
+          !== (projectedLocalRevisions.get(projected.id) ?? 0);
+        return revisionChanged
+          ? currentNotes.find((note) => note.id === projected.id && note.notebookId === notebookId)
+          : materializedNotes.get(projected.id);
+      })
+      .filter((note): note is Note => note !== undefined);
+    const locallyCreatedDuringProjection = currentNotes.filter((note) => {
+      if (note.notebookId !== notebookId || projectedNoteIds.has(note.id)) return false;
+      const key = collaborationNoteKey(notebookId, note.id);
+      return !localNoteIdsAtProjectionStart.has(note.id)
+        && (localNoteRevisionsRef.current.get(key) ?? 0) > 0
+        && !tombstonedNoteIdsRef.current.has(key);
+    });
+    commitSelectedNotebookNotes([
+      ...projectedNotesAfterPersistence,
+      ...locallyCreatedDuringProjection,
+    ]);
+  }, [handleCollaborativeNotebookUpdated, setActiveNoteIdAndStore, setOpenNoteIdsAndStore]);
 
   const {
     contacts: collaborationContacts,
     status: collaborationStatus,
+    sessionNotebookId,
     sessionTopic,
     error: collaborationError,
     addContact,
     removeContact,
     startCollaboration,
+    resumeCollaboration,
     stopCollaboration,
     broadcastLocalUpdate,
+    broadcastLocalDelete,
+    broadcastNotebookRename,
+    inviteModalOpen,
+    inviteDetails,
+    acceptInvite,
+    rejectInvite,
   } = useNotebookCollaboration({
     client: xmtpClient,
     userAddress: userAddress,
-    onRemoteUpdate: handleRemoteCrdtUpdate,
+    xmtpEnv: xmtpNetworkEnv,
+    onRemoteProjection: handleRemoteProjection,
+    onNotebookUpdated: handleCollaborativeNotebookUpdated,
     debugLoggingEnabled: debugLoggingEnabled,
   });
-
-  const notesColumnRef = useRef<HTMLDivElement>(null);
-  const editorRef = useRef<HTMLDivElement>(null);
-  const editorTitleInputRef = useRef<HTMLInputElement>(null);
-  const editorTextAreaRef = useRef<HTMLTextAreaElement>(null);
-
-  const sidebarRef = useRef<SidebarHandle>(null);
-  const notebooksListRef = useRef<HTMLUListElement>(null);
-  const notesMutationVersionRef = useRef(0);
-  const selectedNotebookIdRef = useRef(selectedNotebookId);
-  const openNoteIdsRef = useRef(openNoteIds);
-  const activeNoteIdRef = useRef(activeNoteId);
-  const notebooksRef = useRef(notebooks);
-  const notesRef = useRef(notes);
-  const foldersRef = useRef(folders);
-  const noteUpdateQueuesRef = useRef<Map<string, Promise<Note | undefined>>>(new Map());
 
   const getNoteById = (id: string | null): Note | null => {
     if (!id) return null;
     return notes.find(note => note.id === id) || null;
   }
   const selectedNotebook = notebooks.find(notebook => notebook.id === selectedNotebookId) || null;
+  const selectedNotebookConversationId = getNotebookConversationId(selectedNotebook, xmtpNetworkEnv);
   const activeNote = getNoteById(activeNoteId);
+
+  useEffect(() => {
+    if (!xmtpClient) {
+      autoResumeKeyRef.current = null;
+      return;
+    }
+
+    const notebookId = selectedNotebook?.id;
+    const conversationId = selectedNotebookConversationId;
+    if (!notebookId || !conversationId) {
+      autoResumeKeyRef.current = null;
+      if (sessionNotebookId) void stopCollaboration();
+      return;
+    }
+
+    const resumeKey = `${xmtpNetworkEnv}:${notebookId}:${conversationId}`;
+    if (sessionNotebookId === notebookId) {
+      autoResumeKeyRef.current = resumeKey;
+      return;
+    }
+    if (collaborationStatus === 'starting') return;
+    if (autoResumeKeyRef.current === resumeKey) return;
+    autoResumeKeyRef.current = resumeKey;
+    void resumeCollaboration(notebookId, selectedNotebook.name);
+  }, [
+    collaborationStatus,
+    resumeCollaboration,
+    selectedNotebook?.id,
+    selectedNotebook?.name,
+    selectedNotebookConversationId,
+    sessionNotebookId,
+    stopCollaboration,
+    xmtpClient,
+    xmtpNetworkEnv,
+  ]);
+
   const workspaceStatus = isLoading
     ? 'Stormdance workspace loading.'
     : [
@@ -274,25 +455,6 @@ function App() {
   const showToast = useCallback((title: string, description: string, variant: 'default' | 'destructive' = 'default') => {
     setToastMessage({ title, description, variant });
     setTimeout(() => setToastMessage(null), 3000);
-  }, []);
-
-  const setSelectedNotebookIdAndStore = useCallback((nextNotebookId: string | null) => {
-    selectedNotebookIdRef.current = nextNotebookId;
-    setSelectedNotebookId(nextNotebookId);
-    storeNullableString(WORKSPACE_STORAGE_KEYS.selectedNotebookId, nextNotebookId);
-  }, []);
-
-  const setOpenNoteIdsAndStore = useCallback((nextOpenNoteIds: string[]) => {
-    const uniqueOpenNoteIds = [...new Set(nextOpenNoteIds)];
-    openNoteIdsRef.current = uniqueOpenNoteIds;
-    setOpenNoteIds(uniqueOpenNoteIds);
-    localStorage.setItem(WORKSPACE_STORAGE_KEYS.openNoteIds, JSON.stringify(uniqueOpenNoteIds));
-  }, []);
-
-  const setActiveNoteIdAndStore = useCallback((nextActiveNoteId: string | null) => {
-    activeNoteIdRef.current = nextActiveNoteId;
-    setActiveNoteId(nextActiveNoteId);
-    storeNullableString(WORKSPACE_STORAGE_KEYS.activeNoteId, nextActiveNoteId);
   }, []);
 
   useEffect(() => {
@@ -336,10 +498,16 @@ function App() {
         folderId: folderId
       });
       notesMutationVersionRef.current += 1;
-
-      setNotes(prevNotes => [newNote, ...prevNotes].sort((a, b) => b.updatedAt - a.updatedAt));
+      const key = collaborationNoteKey(newNote.notebookId, newNote.id);
+      localNoteRevisionsRef.current.set(key, (localNoteRevisionsRef.current.get(key) ?? 0) + 1);
+      tombstonedNoteIdsRef.current.delete(key);
+      const nextNotes = [newNote, ...notesRef.current.filter((note) => note.id !== newNote.id)]
+        .sort((left, right) => right.updatedAt - left.updatedAt);
+      notesRef.current = nextNotes;
+      setNotes(nextNotes);
       setOpenNoteIdsAndStore([...openNoteIdsRef.current, newNote.id]);
       setActiveNoteIdAndStore(newNote.id);
+      broadcastLocalUpdate(newNote);
 
       setTimeout(() => {
         sidebarRef.current?.focusItem('note', newNote.id);
@@ -353,7 +521,7 @@ function App() {
       showToast('Error', 'Failed to create note', 'destructive');
       return null;
     }
-  }, [selectedNotebookId, setActiveNoteIdAndStore, setOpenNoteIdsAndStore, showToast]);
+  }, [broadcastLocalUpdate, selectedNotebookId, setActiveNoteIdAndStore, setOpenNoteIdsAndStore, showToast]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: globalThis.KeyboardEvent) => {
@@ -578,32 +746,47 @@ function App() {
     }
   };
 
-  const handleUpdateNote = useCallback((id: string, updates: ProgrammaticNoteUpdates): Promise<Note | undefined> => {
-    const previousUpdate = noteUpdateQueuesRef.current.get(id) || Promise.resolve(undefined);
+  const handleUpdateNote = useCallback((
+    id: string,
+    updates: ProgrammaticNoteUpdates,
+    textBase: NoteTextBase = {},
+  ): Promise<Note | undefined> => {
+    const currentNote = notesRef.current.find((note) => note.id === id);
+    if (!currentNote) return Promise.resolve(undefined);
+    const key = collaborationNoteKey(currentNote.notebookId, id);
+    if (tombstonedNoteIdsRef.current.has(key)) return Promise.resolve(undefined);
+
+    const rebasedUpdates: ProgrammaticNoteUpdates = { ...updates };
+    if (updates.title !== undefined && textBase.title !== undefined) {
+      rebasedUpdates.title = rebaseStringEdit(textBase.title, updates.title, currentNote.title);
+    }
+    if (updates.content !== undefined && textBase.content !== undefined) {
+      rebasedUpdates.content = rebaseStringEdit(textBase.content, updates.content, currentNote.content);
+    }
+    const optimisticNote: Note = {
+      ...currentNote,
+      ...rebasedUpdates,
+      updatedAt: Math.max(Date.now(), currentNote.updatedAt + 1),
+    };
+    localNoteRevisionsRef.current.set(key, (localNoteRevisionsRef.current.get(key) ?? 0) + 1);
+    const optimisticNotes = notesRef.current.map((note) => note.id === id ? optimisticNote : note);
+    notesRef.current = optimisticNotes;
+    setNotes(optimisticNotes);
+
+    // Apply the editor delta to Yjs before awaiting IndexedDB. A remote update
+    // arriving during storage I/O now merges with the current local text
+    // instead of treating a stale whole-editor value as a deletion.
+    broadcastLocalUpdate(optimisticNote);
+
+    const previousUpdate = noteUpdateQueuesRef.current.get(key) || Promise.resolve(undefined);
 
     const queuedUpdate = previousUpdate
       .catch(() => undefined)
       .then(async (): Promise<Note | undefined> => {
         try {
-          const updatedNote = await dbService.updateNote(id, updates);
-
-          if (!updatedNote) {
-            return undefined;
-          }
-
-          let noteForBroadcast: Note = updatedNote;
-          setNotes(prevNotes => {
-            const nextNotes = prevNotes.map(note => {
-              if (note.id !== id) return note;
-
-              noteForBroadcast = { ...note, ...updates, updatedAt: updatedNote.updatedAt };
-              return noteForBroadcast;
-            });
-            notesRef.current = nextNotes;
-            return nextNotes;
-          });
-          await broadcastLocalUpdate(noteForBroadcast);
-          return noteForBroadcast;
+          if (tombstonedNoteIdsRef.current.has(key)) return undefined;
+          await dbService.upsertExternalNote(optimisticNote);
+          return optimisticNote;
         } catch (error) {
           console.error('Failed to update note:', error);
           showToast('Error', 'Failed to update note', 'destructive');
@@ -611,10 +794,10 @@ function App() {
         }
       });
 
-    noteUpdateQueuesRef.current.set(id, queuedUpdate);
+    noteUpdateQueuesRef.current.set(key, queuedUpdate);
     queuedUpdate.finally(() => {
-      if (noteUpdateQueuesRef.current.get(id) === queuedUpdate) {
-        noteUpdateQueuesRef.current.delete(id);
+      if (noteUpdateQueuesRef.current.get(key) === queuedUpdate) {
+        noteUpdateQueuesRef.current.delete(key);
       }
     });
 
@@ -669,15 +852,42 @@ function App() {
 
   const handleDeleteNote = async (id: string) => {
     try {
-      await dbService.deleteNote(id);
+      const deletedAt = Date.now();
+      const noteToDelete = notesRef.current.find((note) => note.id === id);
+      if (!noteToDelete) return;
+      const key = collaborationNoteKey(noteToDelete.notebookId, id);
+      localNoteRevisionsRef.current.set(key, (localNoteRevisionsRef.current.get(key) ?? 0) + 1);
+      tombstonedNoteIdsRef.current.add(key);
       notesMutationVersionRef.current += 1;
 
-      const updatedNotes = notes.filter(note => note.id !== id);
-      setNotes(updatedNotes.sort((a, b) => b.updatedAt - a.updatedAt));
+      const updatedNotes = notesRef.current
+        .filter(note => note.id !== id)
+        .sort((a, b) => b.updatedAt - a.updatedAt);
+      notesRef.current = updatedNotes;
+      setNotes(updatedNotes);
 
       if (openNoteIdsRef.current.includes(id)) {
         handleCloseTab(id);
       }
+
+      const broadcastDelete = broadcastLocalDelete(noteToDelete, deletedAt);
+      const previousUpdate = noteUpdateQueuesRef.current.get(key) || Promise.resolve(undefined);
+      const queuedDelete = previousUpdate
+        .catch(() => undefined)
+        .then(async (): Promise<Note | undefined> => {
+          await broadcastDelete;
+          await dbService.deleteNote(id, noteToDelete.notebookId);
+          return undefined;
+      });
+      noteUpdateQueuesRef.current.set(key, queuedDelete);
+      try {
+        await queuedDelete;
+      } finally {
+        if (noteUpdateQueuesRef.current.get(key) === queuedDelete) {
+          noteUpdateQueuesRef.current.delete(key);
+        }
+      }
+      notesMutationVersionRef.current += 1;
 
       showToast('Success', 'Note deleted');
     } catch (error) {
@@ -708,14 +918,21 @@ function App() {
 
   const handleDeleteFolder = async (folderId: string) => {
     try {
+      const folderToDelete = foldersRef.current.find((folder) => folder.id === folderId);
+      if (!folderToDelete) return;
+      const affectedNotes = notesRef.current.filter((note) => (
+        note.notebookId === folderToDelete.notebookId && note.folderId === folderId
+      ));
+      await Promise.all(affectedNotes.map((note) => (
+        handleUpdateNote(note.id, { folderId: folderToDelete.parentFolderId })
+      )));
       await dbService.deleteFolder(folderId);
 
-      setFolders(folders.filter(folder => folder.id !== folderId));
-
-      if (selectedNotebookId) {
-        const updatedNotes = await dbService.getAllNotes(selectedNotebookId);
-        setNotes(updatedNotes);
-      }
+      setFolders((previous) => previous
+        .filter(folder => folder.id !== folderId)
+        .map((folder) => folder.parentFolderId === folderId
+          ? { ...folder, parentFolderId: folderToDelete.parentFolderId }
+          : folder));
 
       showToast('Success', 'Folder deleted');
     } catch (error) {
@@ -758,10 +975,8 @@ function App() {
 
   const handleMoveNoteToFolder = async (noteId: string, targetFolderId: string | null) => {
     try {
-      const updatedNote = await dbService.moveNoteToFolder(noteId, targetFolderId);
-
+      const updatedNote = await handleUpdateNote(noteId, { folderId: targetFolderId });
       if (updatedNote) {
-        setNotes(notes.map(note => note.id === noteId ? updatedNote : note));
         showToast('Success', 'Note moved successfully');
       }
     } catch (error) {
@@ -785,14 +1000,36 @@ function App() {
     }
   };
 
-  const handleXmtpConnectAttempt = async () => {
-    console.log("App: Attempting XMTP Connect...");
+  const handleXmtpConnectAttempt = async (env: 'dev' | 'production' = xmtpNetworkEnv) => {
+    if (isXmtpConnectingRef.current || xmtpClientRef.current) return;
+
+    const generation = ++xmtpConnectionGenerationRef.current;
+    console.log(`App: Attempting XMTP connect on ${env}...`);
+    isXmtpConnectingRef.current = true;
     setIsXmtpConnecting(true);
     setXmtpStatus('connecting');
+
+    let createdClient: BrowserClient | null = null;
+    try {
+      const { client, wallet } = await createBrowserClient({ env });
+      createdClient = client;
+      const address = await wallet.getAddress();
+      if (xmtpConnectionGenerationRef.current !== generation) {
+        client.close();
+        return;
+      }
+      await handleXmtpConnected(client, address, env);
+    } catch (error) {
+      createdClient?.close();
+      if (xmtpConnectionGenerationRef.current !== generation) return;
+      handleXmtpError(error instanceof Error ? error.message : 'XMTP connection failed');
+    }
   };
 
   const handleXmtpConnected = async (client: BrowserClient, address: string, env: 'dev' | 'production') => {
     console.log("App: XMTP Connected", { address, env });
+    xmtpClientRef.current = client;
+    isXmtpConnectingRef.current = false;
     setXmtpClient(client);
     setUserAddress(address);
     setXmtpStatus('connected');
@@ -807,30 +1044,47 @@ function App() {
     }
   };
 
-  const handleXmtpDisconnect = () => {
+  const handleXmtpDisconnect = async () => {
     console.log("App: XMTP Disconnected");
+    xmtpConnectionGenerationRef.current += 1;
+    const clientToClose = xmtpClientRef.current;
+    xmtpClientRef.current = null;
+    isXmtpConnectingRef.current = false;
     setXmtpClient(null);
     setUserAddress(null);
     setXmtpStatus('disconnected');
     setIsXmtpConnecting(false);
-    stopCollaboration();
+    try {
+      await stopCollaboration();
+    } catch (error) {
+      console.warn('Could not stop the collaboration session cleanly', error);
+    } finally {
+      clientToClose?.close();
+    }
   };
 
   const handleXmtpError = (errorMessage: string) => {
     console.error("App: XMTP Error", errorMessage);
+    xmtpConnectionGenerationRef.current += 1;
+    const clientToClose = xmtpClientRef.current;
+    xmtpClientRef.current = null;
+    isXmtpConnectingRef.current = false;
     setXmtpClient(null);
     setUserAddress(null);
     setXmtpStatus('error');
     setIsXmtpConnecting(false);
+    void stopCollaboration()
+      .catch((error) => console.warn('Could not stop the failed collaboration session', error))
+      .finally(() => clientToClose?.close());
   };
 
   const handleXmtpToggleNetwork = async () => {
     if (isXmtpConnecting) return;
     console.log("App: Toggling XMTP Network...");
     const newEnv = xmtpNetworkEnv === 'dev' ? 'production' : 'dev';
-    handleXmtpDisconnect();
+    await handleXmtpDisconnect();
     setXmtpNetworkEnv(newEnv);
-    setTimeout(() => handleXmtpConnectAttempt(), 100);
+    setTimeout(() => void handleXmtpConnectAttempt(newEnv), 100);
   };
 
   const handleCreateNotebook = async (name: string) => {
@@ -850,6 +1104,7 @@ function App() {
       const updatedNotebook = await dbService.updateNotebook(notebookId, { name: newName });
       if (updatedNotebook) {
         setNotebooks(prev => prev.map(nb => nb.id === notebookId ? updatedNotebook : nb));
+        broadcastNotebookRename(notebookId, updatedNotebook.name, updatedNotebook.updatedAt);
         showToast('Success', 'Notebook renamed');
       }
     } catch (error) {
@@ -871,6 +1126,7 @@ function App() {
     }
 
     try {
+      if (sessionNotebookId === notebookId) await stopCollaboration();
       const success = await dbService.deleteNotebook(notebookId);
       if (success) {
         showToast('Success', `Notebook "${notebookToDelete.name}" deleted.`);
@@ -1057,7 +1313,9 @@ function App() {
         onXmtpToggleNetwork={handleXmtpToggleNetwork}
         onFileChange={handleFileChange}
         isImporting={isImporting}
-        connectedNotebooksCount={notebooks.filter(nb => !!nb.xmtpTopic).length}
+        connectedNotebooksCount={notebooks.filter(
+          (notebook) => !!getNotebookConversationId(notebook, xmtpNetworkEnv),
+        ).length}
         hasIdentity={hasIdentity}
         onCreateIdentity={handleCreateIdentity}
         activeConversationsCount={activeConversationsCount}
@@ -1086,13 +1344,6 @@ function App() {
           >
             <Sidebar
               ref={sidebarRef}
-              xmtpClient={xmtpClient}
-              onXmtpConnected={handleXmtpConnected}
-              onXmtpDisconnected={handleXmtpDisconnect}
-              onXmtpError={handleXmtpError}
-              initialXmtpNetworkEnv={xmtpNetworkEnv}
-              triggerXmtpConnect={isXmtpConnecting && xmtpStatus === 'connecting'}
-              triggerXmtpDisconnect={xmtpStatus === 'disconnected'}
               notebooks={notebooks}
               selectedNotebookId={selectedNotebookId}
               notes={notes}
@@ -1170,6 +1421,16 @@ function App() {
           fileName={importFile.name}
           onImport={handleImportWithPassword}
           onCancel={handleCancelImport}
+        />
+      )}
+
+      {inviteDetails && (
+        <CollaborationInviteModal
+          isOpen={inviteModalOpen}
+          inviterName={inviteDetails.inviterName}
+          notebookName={inviteDetails.notebookName}
+          onAccept={() => void acceptInvite()}
+          onReject={() => void rejectInvite()}
         />
       )}
 

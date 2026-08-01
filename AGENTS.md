@@ -15,6 +15,8 @@ When working on this project, update this file whenever you learn something dura
 - Build: `npm run build`
 - Dev server: `npm run dev`
 - Unit tests: `npm test`
+- CLI build: `npm run build:cli`
+- CLI from source: `npm run cli -- --help`
 - End-to-end tests: `npm run test:e2e`
 - Update Playwright snapshots intentionally: `npm run test:e2e:update`
 - Install Playwright-managed browsers when needed: `npm run test:e2e:install`
@@ -71,6 +73,22 @@ When working on this project, update this file whenever you learn something dura
 - **Conversations**:
     - Use `client.conversations.newDmWithIdentifier(identifier)` for DMs.
     - `identifier` should be `{ identifierKind: 'Ethereum', identifier: address }`.
+    - Collaborative notebooks use one MLS group in one XMTP environment, created with `newGroupWithIdentifiers`, not DM fan-out. Cross-environment rebinding is rejected because IndexedDB note projections are shared.
+    - `Notebook.xmtpTopic` is a legacy field name that now stores the real XMTP group/conversation ID.
+    - Bind groups to notebooks with the description prefix `storm.dance/yjs/1/` plus the URI-encoded notebook ID.
+    - Browser SDK v5 streams take an options object such as `{ onValue, onError, onFail }` and return an async stream whose `end()` must be called. The old callback-first stream API is not compatible.
+    - Do not discard messages solely because `senderInboxId === client.inboxId`; another installation can share the inbox. Track message IDs emitted by this installation instead.
+- **CRDT**:
+    - `NotebookCrdt` in `src/lib/collaboration/crdt.ts` is the merge source of truth. Do not reintroduce whole-note version counters or last-writer-wins replacement.
+    - Persist the encoded Yjs document in IndexedDB and use a two-way state-vector handshake to repair missing history.
+    - Batch local Yjs updates for 250 ms before sending to stay well below XMTP write limits.
+    - Seeding local IndexedDB rows must not force `deleted: false` onto an existing Yjs tombstone.
+- **Node CLI**:
+    - `@xmtp/node-sdk` 6.x requires Node.js 22 in local development and CI.
+    - CLI identities live in XDG profile directories as encrypted ethers keystores; imports are stdin-only and private material must never appear in flags, output, or attached errors.
+    - Linked directories store strict config/state under `.stormdance/`; Markdown ownership is tracked by a manifest, and symlinks or unowned files must never be deleted.
+    - Metadata-free Markdown must be adopted in place through `scanMirror(...).preferredPaths`; writing a second canonical copy causes repeat-import duplicates.
+    - The CLI mirror is flat. Folder IDs round-trip in note metadata, but folder entities/names are not yet CRDT-synchronized. Browser notes whose folder is unknown locally must remain visible at the notebook root.
 - **Vite Config**: Do **NOT** alias `@xmtp/browser-sdk` to a local file (e.g., `src/lib/xmtp-browser-sdk.ts`) as it causes circular dependencies.
 - **Reference**: [XMTP LLM Chat Apps](https://raw.githubusercontent.com/xmtp/docs-xmtp-org/main/llms/llms-chat-apps.txt)
 
@@ -91,3 +109,4 @@ When working on this project, update this file whenever you learn something dura
 - Markdown and split modes share a formatting toolbar. Toolbar actions should update the canonical Markdown text, whether the user last focused the split source textarea or the rendered rich editor.
 - Task list checkboxes are implemented by recognizing Markdown list items that start with `[ ]` or `[x]`; checkbox toggles must update the source Markdown line, not only the rendered input state.
 - `npm run lint` currently reports pre-existing app-wide lint debt. Run targeted ESLint on files you touch, and keep broad cleanup separate from feature work.
+- Vitest discovers both `src/**/*.test.ts` and `cli/**/*.test.ts`; keep CLI filesystem/network tests deterministic with temporary directories and fake XMTP group adapters.

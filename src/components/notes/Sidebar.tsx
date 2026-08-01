@@ -1,7 +1,6 @@
-import React, { useCallback, useState, useEffect, useRef, RefObject, forwardRef, useImperativeHandle } from 'react';
+import React, { useCallback, useState, useEffect, useMemo, useRef, RefObject, forwardRef, useImperativeHandle } from 'react';
 import { Plus, Trash2, Book, Loader2, ChevronRight, ChevronDown, Folder as FolderIcon, Edit2, Info, Key, AlertCircle, Download, Users } from 'lucide-react';
 import { Note, Notebook, Folder, dbService } from '../../lib/db';
-import type { BrowserClient } from '@/lib/xmtp-browser-sdk';
 import { encryptBackup } from '../../lib/cryptoUtils';
 import { saveAs } from 'file-saver';
 import { CollaborationManagerModal } from '@/components/collaboration/CollaborationManagerModal';
@@ -15,15 +14,6 @@ export interface SidebarHandle {
 }
 
 interface SidebarProps {
-  // Updated XMTP props
-  xmtpClient?: BrowserClient | null;
-  onXmtpConnected: (client: BrowserClient, address: string, env: 'dev' | 'production') => void;
-  onXmtpDisconnected: () => void;
-  onXmtpError: (errorMessage: string) => void;
-  initialXmtpNetworkEnv: 'dev' | 'production';
-  triggerXmtpConnect: boolean;
-  triggerXmtpDisconnect: boolean;
-
   // Existing props
   notebooks: Notebook[];
   selectedNotebookId: string | null;
@@ -209,7 +199,17 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
   // --- Helper functions for folder/note retrieval ---
   const getRootFolders = useCallback(() => folders.filter(f => f.parentFolderId === null && f.notebookId === selectedNotebookId).sort((a, b) => a.name.localeCompare(b.name)), [folders, selectedNotebookId]);
   const getChildFolders = useCallback((parentId: string) => folders.filter(f => f.parentFolderId === parentId).sort((a, b) => a.name.localeCompare(b.name)), [folders]);
-  const getNotesInFolder = useCallback((folderId: string | null) => notes.filter(n => n.folderId === folderId && n.notebookId === selectedNotebookId).sort((a, b) => (a.title || '').localeCompare(b.title || '')), [notes, selectedNotebookId]);
+  const selectedFolderIds = useMemo(
+    () => new Set(folders.filter(folder => folder.notebookId === selectedNotebookId).map(folder => folder.id)),
+    [folders, selectedNotebookId],
+  );
+  const getNotesInFolder = useCallback((folderId: string | null) => notes.filter((note) => {
+    if (note.notebookId !== selectedNotebookId) return false;
+    if (folderId !== null) return note.folderId === folderId;
+    // Folder entities are not in the CRDT yet. Keep a remotely synchronized
+    // note visible at the root when this replica does not know its folder ID.
+    return note.folderId === null || !selectedFolderIds.has(note.folderId);
+  }).sort((a, b) => (a.title || '').localeCompare(b.title || '')), [notes, selectedFolderIds, selectedNotebookId]);
 
   // --- Helper function to get flattened list of visible items (defined outside useImperativeHandle) ---
   const getOrderedElements = useCallback((): HTMLElement[] => {
@@ -855,7 +855,7 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
             <div className="flex items-center justify-center h-20 text-gray-500 dark:text-gray-400"><Loader2 className="mr-2 h-4 w-4 animate-spin text-gray-500 dark:text-gray-400" /> Loading...</div>
           ) : !selectedNotebookId ? (
             <p className="text-center text-gray-500 dark:text-gray-400 p-4 italic">Select a notebook</p>
-          ) : (folders.length === 0 && notes.filter(n => n.folderId === null && n.notebookId === selectedNotebookId).length === 0) ? (
+          ) : (folders.length === 0 && getNotesInFolder(null).length === 0) ? (
             <p className="text-center text-gray-500 dark:text-gray-400 p-4 italic">No notes or folders yet</p>
           ) : (
             <ul

@@ -1,4 +1,5 @@
 import { openDB, IDBPDatabase, DBSchema } from 'idb';
+import { normalizeConversationId } from '@/lib/collaboration/bindings';
 
 // --- Interface Definitions ---
 
@@ -8,6 +9,8 @@ export interface Notebook {
   createdAt: number;
   updatedAt: number;
   xmtpTopic?: string;
+  xmtpEnv?: 'dev' | 'production';
+  xmtpBindings?: Partial<Record<'dev' | 'production', string>>;
 }
 
 export interface Folder {
@@ -27,6 +30,20 @@ export interface Note {
   content: string;
   createdAt: number;
   updatedAt: number;
+}
+
+export type CollaborationEnvironment = 'dev' | 'production';
+
+export interface CollaborationState {
+  notebookId: string;
+  state: ArrayBuffer;
+  conversationId: string | null;
+  env: CollaborationEnvironment;
+  updatedAt: number;
+}
+
+interface LegacyCollaborationState extends Omit<CollaborationState, 'env'> {
+  env?: CollaborationEnvironment | null;
 }
 
 // --- Database Schema ---
@@ -55,10 +72,19 @@ interface StormDanceDB extends DBSchema {
       'by-folder': string; // Index non-null folder IDs
     };
   };
+  collaborationStates: {
+    key: string;
+    value: LegacyCollaborationState;
+  };
+  collaborationStatesByEnv: {
+    key: [string, CollaborationEnvironment];
+    value: CollaborationState;
+    indexes: { 'by-notebook': string };
+  };
 }
 
 export const DB_NAME = 'storm.dance';
-const DB_VERSION = 5;
+const DB_VERSION = 7;
 
 let dbPromise: Promise<IDBPDatabase<StormDanceDB>> | null = null;
 let ensureDefaultNotebookPromise: Promise<Notebook> | null = null;
@@ -75,21 +101,44 @@ const initDB = (): Promise<IDBPDatabase<StormDanceDB>> => {
       if (!db.objectStoreNames.contains('notebooks')) {
         const notebooksStore = db.createObjectStore('notebooks', { keyPath: 'id' });
         notebooksStore.createIndex('by-updated', 'updatedAt');
-      } else if (oldVersion < 5) {
-        // V5: Remove aesKey property (migrating to password-based derivation for export/import)
-        console.log("V5 Migration: Removing 'aesKey' from notebooks...");
+      } else if (oldVersion < 7) {
+        // V5 removed aesKey. V7 removes the synthetic pre-MLS topic values so
+        // they cannot be mistaken for real group conversation IDs.
         const store = tx.objectStore('notebooks');
-        (async () => { // IIFE for async operation within upgrade
+        void (async () => {
           let cursor = await store.openCursor();
           while (cursor) {
             const value = cursor.value as Notebook & { aesKey?: unknown };
-            const { aesKey, ...rest } = value;
-            if (aesKey !== undefined) {
-              await cursor.update(rest);
+            const next = { ...value };
+            let changed = false;
+            if (oldVersion < 5 && next.aesKey !== undefined) {
+              delete next.aesKey;
+              changed = true;
             }
+
+            const normalizedTopic = normalizeConversationId(next.xmtpTopic);
+            if (normalizedTopic !== (next.xmtpTopic ?? null)) {
+              if (normalizedTopic) next.xmtpTopic = normalizedTopic;
+              else delete next.xmtpTopic;
+              changed = true;
+            }
+
+            if (next.xmtpBindings) {
+              const normalizedBindings: Notebook['xmtpBindings'] = {};
+              for (const env of ['dev', 'production'] as const) {
+                const normalized = normalizeConversationId(next.xmtpBindings[env]);
+                if (normalized) normalizedBindings[env] = normalized;
+              }
+              if (JSON.stringify(normalizedBindings) !== JSON.stringify(next.xmtpBindings)) {
+                if (Object.keys(normalizedBindings).length > 0) next.xmtpBindings = normalizedBindings;
+                else delete next.xmtpBindings;
+                changed = true;
+              }
+            }
+
+            if (changed) await cursor.update(next);
             cursor = await cursor.continue();
           }
-          console.log("V5 Migration: 'aesKey' removal complete.");
         })();
       }
 
@@ -135,6 +184,17 @@ const initDB = (): Promise<IDBPDatabase<StormDanceDB>> => {
             console.log("V3 Migration: 'folderId' check complete.");
           })();
         }
+      }
+
+      // Collaboration State Store
+      if (!db.objectStoreNames.contains('collaborationStates')) {
+        db.createObjectStore('collaborationStates', { keyPath: 'notebookId' });
+      }
+      if (!db.objectStoreNames.contains('collaborationStatesByEnv')) {
+        const collaborationStatesByEnv = db.createObjectStore('collaborationStatesByEnv', {
+          keyPath: ['notebookId', 'env'],
+        });
+        collaborationStatesByEnv.createIndex('by-notebook', 'notebookId');
       }
     },
     blocked() {
@@ -206,6 +266,11 @@ export const dbService = {
     return notebooks;
   },
 
+  async getNotebook(id: string): Promise<Notebook | undefined> {
+    const db = await this.getDb();
+    return db.get('notebooks', id);
+  },
+
   // Create notebook and GENERATE a new key
   async createNotebook(notebookInput: CreateNotebookInput): Promise<Notebook> {
     const db = await this.getDb();
@@ -233,6 +298,93 @@ export const dbService = {
     const updatedNotebook: Notebook = { ...notebook, ...updates, updatedAt: Date.now() };
     await db.put('notebooks', updatedNotebook);
     return updatedNotebook;
+  },
+
+  // --- Collaboration state operations ---
+  async getCollaborationState(
+    notebookId: string,
+    env: CollaborationEnvironment,
+  ): Promise<CollaborationState | undefined> {
+    const db = await this.getDb();
+    const exact = await db.get('collaborationStatesByEnv', [notebookId, env]);
+    if (exact) return exact;
+
+    // V6 stored one state per notebook. Migrate it lazily into its recorded
+    // environment. Environment-less records are ambiguous and must be dropped
+    // rather than assigned to whichever network happens to read them first.
+    const tx = db.transaction(['collaborationStates', 'collaborationStatesByEnv'], 'readwrite');
+    const rechecked = await tx.objectStore('collaborationStatesByEnv').get([notebookId, env]);
+    if (rechecked) {
+      await tx.done;
+      return rechecked;
+    }
+    const legacy = await tx.objectStore('collaborationStates').get(notebookId);
+    if (!legacy) {
+      await tx.done;
+      return undefined;
+    }
+    if (!legacy.env) {
+      await tx.objectStore('collaborationStates').delete(notebookId);
+      await tx.done;
+      return undefined;
+    }
+    if (legacy.env !== env) {
+      await tx.done;
+      return undefined;
+    }
+    const migrated: CollaborationState = {
+      ...legacy,
+      conversationId: normalizeConversationId(legacy.conversationId),
+      env,
+    };
+    await tx.objectStore('collaborationStatesByEnv').put(migrated);
+    await tx.objectStore('collaborationStates').delete(notebookId);
+    await tx.done;
+    return migrated;
+  },
+
+  async putCollaborationState(
+    notebookId: string,
+    state: ArrayBuffer,
+    conversationId: string | null,
+    env: CollaborationEnvironment,
+  ): Promise<CollaborationState> {
+    const db = await this.getDb();
+    const collaborationState: CollaborationState = {
+      notebookId,
+      state,
+      conversationId: normalizeConversationId(conversationId),
+      env,
+      updatedAt: Date.now(),
+    };
+    await db.put('collaborationStatesByEnv', collaborationState);
+    return collaborationState;
+  },
+
+  async deleteCollaborationState(
+    notebookId: string,
+    env?: CollaborationEnvironment,
+  ): Promise<boolean> {
+    const db = await this.getDb();
+    const tx = db.transaction(['collaborationStates', 'collaborationStatesByEnv'], 'readwrite');
+    if (env) {
+      await tx.objectStore('collaborationStatesByEnv').delete([notebookId, env]);
+      const legacy = await tx.objectStore('collaborationStates').get(notebookId);
+      if (!legacy?.env || legacy.env === env) {
+        await tx.objectStore('collaborationStates').delete(notebookId);
+      }
+    } else {
+      let cursor = await tx.objectStore('collaborationStatesByEnv')
+        .index('by-notebook')
+        .openKeyCursor(IDBKeyRange.only(notebookId));
+      while (cursor) {
+        await cursor.delete();
+        cursor = await cursor.continue();
+      }
+      await tx.objectStore('collaborationStates').delete(notebookId);
+    }
+    await tx.done;
+    return true;
   },
 
   // --- Folder operations ---
@@ -348,13 +500,38 @@ export const dbService = {
 
   async upsertExternalNote(note: Note): Promise<Note> {
     const db = await this.getDb();
-    await db.put('notes', note);
+    const tx = db.transaction('notes', 'readwrite');
+    const store = tx.objectStore('notes');
+    const existing = await store.get(note.id);
+    if (existing && existing.notebookId !== note.notebookId) {
+      await tx.done;
+      throw new Error(`Note ${note.id} belongs to notebook ${existing.notebookId}, not ${note.notebookId}`);
+    }
+    await store.put(note);
+    await tx.done;
     return note;
   },
 
-  async deleteNote(id: string): Promise<boolean> {
+  async deleteNote(id: string, expectedNotebookId?: string): Promise<boolean> {
     const db = await this.getDb();
-    await db.delete('notes', id);
+    if (!expectedNotebookId) {
+      await db.delete('notes', id);
+      return true;
+    }
+
+    const tx = db.transaction('notes', 'readwrite');
+    const store = tx.objectStore('notes');
+    const existing = await store.get(id);
+    if (!existing) {
+      await tx.done;
+      return false;
+    }
+    if (existing.notebookId !== expectedNotebookId) {
+      await tx.done;
+      throw new Error(`Note ${id} belongs to notebook ${existing.notebookId}, not ${expectedNotebookId}`);
+    }
+    await store.delete(id);
+    await tx.done;
     return true;
   },
 
@@ -368,11 +545,16 @@ export const dbService = {
     const notebook = await db.get('notebooks', notebookId);
     if (!notebook) return false;
 
-    // Use a transaction to delete notebook, folders, and notes atomically
-    const tx = db.transaction(['notebooks', 'folders', 'notes'], 'readwrite');
+    // Use a transaction to delete notebook, folders, notes, and collaboration state atomically
+    const tx = db.transaction(
+      ['notebooks', 'folders', 'notes', 'collaborationStates', 'collaborationStatesByEnv'],
+      'readwrite',
+    );
     const notesStore = tx.objectStore('notes');
     const foldersStore = tx.objectStore('folders');
     const notebooksStore = tx.objectStore('notebooks');
+    const collaborationStatesStore = tx.objectStore('collaborationStates');
+    const collaborationStatesByEnvStore = tx.objectStore('collaborationStatesByEnv');
 
     // 1. Delete all notes associated with the notebook
     let notesCursor = await notesStore.index('by-notebook-updated').openCursor(IDBKeyRange.bound([notebookId, -Infinity], [notebookId, Infinity]));
@@ -388,7 +570,17 @@ export const dbService = {
       foldersCursor = await foldersCursor.continue();
     }
 
-    // 3. Delete the notebook itself
+    // 3. Delete collaboration state associated with the notebook
+    await collaborationStatesStore.delete(notebookId);
+    let collaborationStateCursor = await collaborationStatesByEnvStore
+      .index('by-notebook')
+      .openKeyCursor(IDBKeyRange.only(notebookId));
+    while (collaborationStateCursor) {
+      await collaborationStateCursor.delete();
+      collaborationStateCursor = await collaborationStateCursor.continue();
+    }
+
+    // 4. Delete the notebook itself
     await notebooksStore.delete(notebookId);
 
     await tx.done;

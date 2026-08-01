@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Users, MessageCircle, X, ShieldCheck, Loader2 } from 'lucide-react';
+import { MessageCircle, X, ShieldCheck, Loader2 } from 'lucide-react';
 import { CollaborationContact } from '@/lib/collaboration/types';
 import { CollaborationStatus } from '@/hooks/useNotebookCollaboration';
 
@@ -126,7 +126,7 @@ export function CollaborationManagerModal({
                         <div className="text-xs text-muted-foreground flex items-center space-x-1">
                             <MessageCircle className="h-3 w-3" />
                             <span className="truncate max-w-[300px]" title={sessionTopic}>
-                                Topic: {sessionTopic}
+                                XMTP group: {sessionTopic}
                             </span>
                         </div>
                     )}

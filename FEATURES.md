@@ -121,21 +121,52 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
 
 ### Collaboration Over XMTP
 - **Stability**: in-progress
-- **Description**: Users can coordinate notebook collaboration sessions over XMTP.
+- **Description**: Users can edit the same notebook through a Yjs document carried by an encrypted XMTP MLS group.
 - **Properties**:
   - Collaborators can be added by ENS name or Ethereum address.
   - Reachability is verified through XMTP before contacts are used for collaboration.
-  - A collaboration session can be started for the selected notebook.
-  - Starting collaboration opens DM conversations, sends invite payloads, and stores the notebook topic.
-  - Local note updates can be broadcast as CRDT update payloads.
-  - Incoming invite payloads can be accepted or rejected.
-  - Remote CRDT updates merge into local state and persist to IndexedDB.
+  - One XMTP MLS group in one XMTP environment represents a collaborative notebook; cross-environment rebinding is rejected and the real conversation ID is persisted locally.
+  - Group descriptions bind a conversation to a URI-encoded notebook ID; unrelated groups are ignored.
+  - New groups use XMTP admin-only permissions and membership is added by Ethereum identifier.
+  - One Yjs document owns notebook metadata, stable note IDs, `Y.Text` title/content, timestamps, folder IDs, and deletion tombstones.
+  - Local Yjs updates are merged into a 250 ms batch before XMTP transmission.
+  - Strict, versioned protocol messages support manifests, snapshots, incremental updates, and state-vector requests.
+  - Binary updates are size-bounded, chunked, duplicate-tolerant, and safely reassembled out of order.
+  - A two-way state-vector handshake repairs missed history and offline edits in either direction.
+  - Incoming XMTP groups can be accepted or rejected through group consent; accepted notebooks are materialized locally.
+  - Environment-keyed Yjs state is authoritative on reconnect; remote projections persist to IndexedDB, update open UI state, and preserve tombstones.
+  - Same-inbox devices distinguish their own messages by protocol message ID instead of dropping all messages from the inbox.
+  - Selecting a linked notebook resumes collaboration, while explicit stop and disconnect cleanly end streams.
+  - Folder IDs travel with notes, but folder entities/names are not yet synchronized between browser replicas; notes for unknown folders remain visible at the notebook root.
   - Stopping collaboration tears down active streams and clears session state.
 - **Test Criteria**:
   - [x] Vitest covers ENS/address resolution.
-  - [x] Vitest covers collaboration broadcast and duplicate remote update handling.
+  - [x] Vitest covers concurrent Yjs edits, offline state-vector repair, duplicate/out-of-order updates, and deletion tombstones.
+  - [x] Vitest covers group creation, 250 ms batching, history/live delivery, same-inbox installations, and stream cleanup.
+  - [x] A deterministic two-client transport test proves both replicas converge after concurrent edits.
   - [ ] Browser tests cover invite acceptance/rejection without live XMTP network calls.
-  - [ ] Multi-client collaboration tests cover remote note update application.
+  - [ ] A live dev-network smoke test covers two independent XMTP identities and installations.
+
+### Command-Line Markdown Sync
+- **Stability**: in-progress
+- **Description**: A Node CLI binds an XMTP notebook to a bidirectional, indexer-friendly directory of Markdown files.
+- **Properties**:
+  - `stormdance auth init`, `auth import`, and `auth address` manage named XMTP identity profiles.
+  - CLI identities use encrypted ethers keystores, 0700 profile directories, 0600 files, and a stable 32-byte XMTP database encryption key.
+  - Identity import accepts a raw private key or encrypted keystore only on standard input, never as a CLI option.
+  - `notebooks list` discovers only groups with the storm.dance notebook description prefix.
+  - `link` persists strict `.stormdance/config.json` metadata and performs the initial sync.
+  - `sync` performs a finite catch-up; `sync --watch` keeps the group and directory live until interrupted.
+  - `.stormdance/state.bin` persists the local Yjs replica so catch-up does not depend on indefinite XMTP history.
+  - Live notes materialize as flat, collision-safe `.md` files with stable identity/timestamp metadata.
+  - Metadata-free Markdown is adopted in place once rather than repeatedly imported as duplicate notes.
+  - External edits, new Markdown files, renames, and owned-file deletion tombstones flow back into Yjs and XMTP.
+  - Writes are atomic per file, unchanged files are not rewritten, unsafe paths and symlinks are rejected, unowned files are never deleted, and manifest hashes preserve unsynced replacements of owned paths.
+  - The flat directory can be consumed by local full-text search, embedding pipelines, and vector databases without a storm.dance-specific reader.
+- **Test Criteria**:
+  - [x] Vitest covers strict metadata round-trips, incremental materialization, adoption, rename, deletion, UTF-8, collision, and symlink safety.
+  - [x] Vitest covers group discovery, strict link configuration, history replay, Yjs persistence, delta requests, 250 ms batching, and file deletion tombstones.
+  - [ ] A live dev-network smoke test links a CLI profile invited from the browser and observes edits in both directions.
 
 ### IPFS Status and Decentralized Storage
 - **Stability**: in-progress
@@ -157,7 +188,7 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - Ethereum wallet identity should interoperate with collaboration and publishing.
   - Data pointer mechanisms may use an L2 contract, ENS/IPNS, ENS/CCIP-Read, Ceramic, or XMTP-centric discovery.
   - Farcaster friend syncing may bootstrap social connections.
-  - Encrypted CRDT synchronization must account for key sharing and conflict resolution.
+  - Application-level encryption at rest and key wrapping should complement the existing XMTP MLS transport and Yjs conflict resolution.
 - **Test Criteria**:
   - [ ] Encryption round-trips note data before any remote storage write.
   - [ ] Identity-derived keys or key wrapping are specified before implementation.
@@ -173,7 +204,9 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
 - **Local Database**: IndexedDB through `idb`
 - **Forms**: React Hook Form and Zod
 - **Date Handling**: date-fns
-- **Messaging**: `@xmtp/browser-sdk` 5.0.1
+- **Messaging**: `@xmtp/browser-sdk` 5.0.1 and `@xmtp/node-sdk` 6.x
+- **Collaboration**: Yjs 13.x with a versioned, chunked text protocol over XMTP MLS groups
+- **CLI Runtime**: Node.js 22 or newer
 - **Ethereum**: Ethers.js 6
 - **Polyfills**: `vite-plugin-node-polyfills`, `buffer`, `crypto-browserify`, and `stream-browserify`
 

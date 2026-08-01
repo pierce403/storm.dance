@@ -17,8 +17,10 @@ export interface CrdtUpdatePayload {
 export interface InvitePayload {
   notebookId: string;
   notebookName: string;
-  inviterName?: string; // Optional display name
-  inviterAddress: string;
+  conversationId: string;
+  env: 'dev' | 'production';
+  inviterName?: string;
+  inviterInboxId?: string;
 }
 
 export type CollaborationMessage =

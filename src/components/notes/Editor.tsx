@@ -28,10 +28,15 @@ import {
 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import { Note } from '../../lib/db';
+import { rebaseStringEdit } from '../../lib/collaboration/crdt';
 
 interface EditorProps {
   note: Note | null;
-  onUpdateNote: (id: string, updates: Partial<Omit<Note, 'id' | 'createdAt' | 'updatedAt' | 'notebookId'>>) => void;
+  onUpdateNote: (
+    id: string,
+    updates: Partial<Omit<Note, 'id' | 'createdAt' | 'updatedAt' | 'notebookId'>>,
+    textBase?: Partial<Pick<Note, 'title' | 'content'>>,
+  ) => void;
   titleInputRef: RefObject<HTMLInputElement>;
   textAreaRef: RefObject<HTMLTextAreaElement>;
 }
@@ -390,6 +395,7 @@ function serializeMarkdownDocument(element: HTMLElement): string {
 
 interface RichMarkdownEditorProps {
   markdown: string;
+  projectionVersion: number;
   onMarkdownInput: (markdown: string) => void;
   onMarkdownCommit: (markdown: string) => void;
   onEditorFocus?: () => void;
@@ -461,7 +467,7 @@ function MarkdownContent({ markdown, onTaskToggle }: MarkdownContentProps) {
 }
 
 const RichMarkdownEditor = React.memo(forwardRef<RichMarkdownEditorHandle, RichMarkdownEditorProps>(function RichMarkdownEditor(
-  { markdown, onMarkdownInput, onMarkdownCommit, onEditorFocus },
+  { markdown, projectionVersion, onMarkdownInput, onMarkdownCommit, onEditorFocus },
   ref,
 ) {
   const editorRef = useRef<HTMLElement>(null);
@@ -470,17 +476,20 @@ const RichMarkdownEditor = React.memo(forwardRef<RichMarkdownEditorHandle, RichM
   const [renderedMarkdown, setRenderedMarkdown] = useState(markdown);
   const lastSyncedMarkdownRef = useRef(markdown);
   const latestMarkdownRef = useRef(markdown);
+  const lastProjectionVersionRef = useRef(projectionVersion);
 
   useEffect(() => {
     const editor = editorRef.current;
     const editorHasFocus = !!editor && (document.activeElement === editor || editor.contains(document.activeElement));
+    const projectionChanged = lastProjectionVersionRef.current !== projectionVersion;
 
-    if (!editorHasFocus && markdown !== lastSyncedMarkdownRef.current) {
+    if (projectionChanged || (!editorHasFocus && markdown !== lastSyncedMarkdownRef.current)) {
+      lastProjectionVersionRef.current = projectionVersion;
       lastSyncedMarkdownRef.current = markdown;
       latestMarkdownRef.current = markdown;
       setRenderedMarkdown(markdown);
     }
-  }, [markdown]);
+  }, [markdown, projectionVersion]);
 
   const captureSelection = () => {
     const editor = editorRef.current;
@@ -553,13 +562,15 @@ const RichMarkdownEditor = React.memo(forwardRef<RichMarkdownEditorHandle, RichM
     captureSelection();
   };
 
-  const handleBlur = () => {
+  const handleBlur = (event: React.FocusEvent<HTMLElement>) => {
     if (!editorRef.current) return;
+    if (event.relatedTarget instanceof Node && editorRef.current.contains(event.relatedTarget)) return;
 
-    const nextMarkdown = latestMarkdownRef.current || serializeMarkdownDocument(editorRef.current);
+    const nextMarkdown = serializeMarkdownDocument(editorRef.current);
     lastSyncedMarkdownRef.current = nextMarkdown;
     latestMarkdownRef.current = nextMarkdown;
     setRenderedMarkdown(nextMarkdown);
+    onMarkdownCommit(nextMarkdown);
   };
 
   const applyCommand = (command: MarkdownCommand) => {
@@ -617,14 +628,9 @@ const RichMarkdownEditor = React.memo(forwardRef<RichMarkdownEditorHandle, RichM
       {markdownForRender.trim() ? <MarkdownContent markdown={markdownForRender} onTaskToggle={handleTaskToggle} /> : null}
     </article>
   );
-}), (previousProps, nextProps) => {
-  if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
-    const focusedMarkdownEditor = document.activeElement.closest('[data-markdown-editor="true"]');
-    if (focusedMarkdownEditor) return true;
-  }
-
-  return previousProps.markdown === nextProps.markdown;
-});
+}), (previousProps, nextProps) => (
+  previousProps.projectionVersion === nextProps.projectionVersion
+));
 
 interface MarkdownToolbarProps {
   onCommand: (command: MarkdownCommand) => void;
@@ -800,20 +806,37 @@ function MarkdownToolbar({ onCommand }: MarkdownToolbarProps) {
 export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: EditorProps) {
   const [editorMode, setEditorMode] = useState<EditorMode>(getInitialEditorMode);
   const [content, setContent] = useState(note?.content || '');
+  const [richProjectionVersion, setRichProjectionVersion] = useState(0);
   const contentRef = useRef(note?.content || '');
+  const latestProjectedContentRef = useRef(note?.content || '');
+  const titleRef = useRef(note?.title || '');
   const currentNoteIdRef = useRef(note?.id || null);
   const richMarkdownEditorRef = useRef<RichMarkdownEditorHandle>(null);
   const lastMarkdownSurfaceRef = useRef<'source' | 'rich'>('rich');
   const richEditPendingRef = useRef(false);
+  const richEditNoteIdRef = useRef<string | null>(null);
+  const richEditBaseRef = useRef<string | null>(null);
   const lastRichInputMarkdownRef = useRef<string | null>(null);
   const richSaveTimerRef = useRef<number | null>(null);
+  const renderedNoteIdRef = useRef(note?.id || null);
+  const onUpdateNoteRef = useRef(onUpdateNote);
+  const flushPendingRichEditRef = useRef<(expectedNoteId: string, syncEditor: boolean) => void>(() => undefined);
+
+  renderedNoteIdRef.current = note?.id || null;
+  onUpdateNoteRef.current = onUpdateNote;
+  if (
+    note
+    && (!richEditPendingRef.current || richEditNoteIdRef.current === note.id)
+  ) {
+    // Keep the pending edit's projection pinned to its originating note. A new
+    // note can render before the previous note's passive cleanup has flushed.
+    latestProjectedContentRef.current = note.content || '';
+  }
 
   useEffect(() => {
+    const effectNoteId = note?.id || null;
     return () => {
-      if (richSaveTimerRef.current !== null) {
-        window.clearTimeout(richSaveTimerRef.current);
-        richSaveTimerRef.current = null;
-      }
+      if (effectNoteId) flushPendingRichEditRef.current(effectNoteId, false);
     };
   }, [note?.id]);
 
@@ -822,39 +845,46 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
       const sameNote = currentNoteIdRef.current === note.id;
       const nextContent = note.content || '';
       if (!sameNote) {
-        richEditPendingRef.current = false;
-        lastRichInputMarkdownRef.current = null;
+        const pendingNoteId = richEditNoteIdRef.current;
+        if (pendingNoteId && pendingNoteId !== note.id) {
+          flushPendingRichEditRef.current(pendingNoteId, false);
+        }
       }
 
-      if (sameNote && richEditPendingRef.current && nextContent !== contentRef.current) {
-        if (titleInputRef.current) {
-          titleInputRef.current.value = note.title || '';
-        }
+      titleRef.current = note.title || '';
+      if (titleInputRef.current) {
+        titleInputRef.current.value = titleRef.current;
+      }
+
+      if (
+        sameNote
+        && richEditPendingRef.current
+        && richEditNoteIdRef.current === note.id
+      ) {
+        // Keep the local DOM draft only until its short debounce fires. The
+        // save rebases from richEditBaseRef onto this latest projection, then
+        // forces the focused contenteditable to render the merged result.
         return;
       }
-      if (sameNote && nextContent === contentRef.current) {
-        richEditPendingRef.current = false;
-      }
-
-      const markdownEditorHasFocus = document.activeElement instanceof HTMLElement && !!document.activeElement.closest('[data-markdown-editor="true"]');
-      if (editorMode === 'markdown' && markdownEditorHasFocus) return;
 
       // Update input values when note changes
-      if (titleInputRef.current) {
-        titleInputRef.current.value = note.title || '';
-      }
       currentNoteIdRef.current = note.id;
+      latestProjectedContentRef.current = nextContent;
       contentRef.current = nextContent;
       setContent(nextContent);
+      setRichProjectionVersion((version) => version + 1);
       if (textAreaRef.current) {
         textAreaRef.current.value = nextContent;
       }
     }
-  }, [editorMode, note, titleInputRef, textAreaRef]);
+  }, [note, titleInputRef, textAreaRef]);
 
   const handleTitleInput = (e: React.FormEvent<HTMLInputElement>) => {
     if (note) {
-      onUpdateNote(note.id, { title: e.currentTarget.value });
+      const nextTitle = e.currentTarget.value;
+      const baseTitle = titleRef.current;
+      titleRef.current = nextTitle;
+      onUpdateNote(note.id, { title: nextTitle }, { title: baseTitle });
     }
   };
 
@@ -866,47 +896,99 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
     }
   };
 
-  const persistContent = (nextContent: string) => {
-    if (note) {
-      onUpdateNote(note.id, { content: nextContent });
-    }
+  const persistContent = (noteId: string, nextContent: string, baseContent: string) => {
+    onUpdateNoteRef.current(noteId, { content: nextContent }, { content: baseContent });
   };
 
   const updateContent = (nextContent: string) => {
+    const baseContent = contentRef.current;
     syncLocalContent(nextContent);
-    persistContent(nextContent);
+    setRichProjectionVersion((version) => version + 1);
+    if (note) persistContent(note.id, nextContent, baseContent);
   };
 
-  const scheduleRichContentSave = (nextContent: string) => {
+  const persistRichContent = (noteId: string, nextContent: string, syncEditor: boolean) => {
+    if (!richEditPendingRef.current || richEditNoteIdRef.current !== noteId) return;
+    const baseContent = richEditBaseRef.current ?? contentRef.current;
+    const mergedContent = rebaseStringEdit(
+      baseContent,
+      nextContent,
+      latestProjectedContentRef.current,
+    );
+    persistContent(noteId, nextContent, baseContent);
+    richEditPendingRef.current = false;
+    richEditNoteIdRef.current = null;
+    richEditBaseRef.current = null;
+    lastRichInputMarkdownRef.current = null;
+    if (syncEditor && renderedNoteIdRef.current === noteId) {
+      syncLocalContent(mergedContent);
+      setRichProjectionVersion((version) => version + 1);
+    }
+  };
+
+  const flushPendingRichEdit = (expectedNoteId: string, syncEditor = true) => {
+    if (!richEditPendingRef.current || richEditNoteIdRef.current !== expectedNoteId) return;
+    if (richSaveTimerRef.current !== null) {
+      window.clearTimeout(richSaveTimerRef.current);
+      richSaveTimerRef.current = null;
+    }
+    const nextContent = lastRichInputMarkdownRef.current;
+    if (nextContent === null) return;
+    persistRichContent(expectedNoteId, nextContent, syncEditor);
+  };
+  flushPendingRichEditRef.current = flushPendingRichEdit;
+
+  const scheduleRichContentSave = (noteId: string) => {
     if (richSaveTimerRef.current !== null) {
       window.clearTimeout(richSaveTimerRef.current);
     }
 
     richSaveTimerRef.current = window.setTimeout(() => {
       richSaveTimerRef.current = null;
-      persistContent(nextContent);
+      flushPendingRichEditRef.current(noteId, true);
     }, 75);
   };
 
   const handleRichMarkdownInput = (nextMarkdown: string) => {
+    if (!note) return;
+    const pendingNoteId = richEditNoteIdRef.current;
+    if (pendingNoteId && pendingNoteId !== note.id) {
+      flushPendingRichEditRef.current(pendingNoteId, false);
+    }
+    if (!richEditPendingRef.current) {
+      richEditNoteIdRef.current = note.id;
+      richEditBaseRef.current = contentRef.current;
+      latestProjectedContentRef.current = note.content || '';
+    }
     richEditPendingRef.current = true;
     lastRichInputMarkdownRef.current = nextMarkdown;
     syncLocalContent(nextMarkdown);
-    scheduleRichContentSave(nextMarkdown);
+    scheduleRichContentSave(note.id);
   };
 
   const handleRichMarkdownCommit = (nextMarkdown: string) => {
-    const markdownToCommit = lastRichInputMarkdownRef.current || nextMarkdown;
-    richEditPendingRef.current = true;
-    syncLocalContent(markdownToCommit);
-    if (richSaveTimerRef.current !== null) {
-      window.clearTimeout(richSaveTimerRef.current);
-      richSaveTimerRef.current = null;
+    if (!note) return;
+    const pendingForCurrentNote = richEditPendingRef.current && richEditNoteIdRef.current === note.id;
+    const markdownToCommit = pendingForCurrentNote
+      ? (lastRichInputMarkdownRef.current ?? nextMarkdown)
+      : nextMarkdown;
+    if (!pendingForCurrentNote && markdownToCommit === contentRef.current) return;
+    if (!pendingForCurrentNote) {
+      const pendingNoteId = richEditNoteIdRef.current;
+      if (pendingNoteId) flushPendingRichEditRef.current(pendingNoteId, false);
+      richEditNoteIdRef.current = note.id;
+      richEditBaseRef.current = contentRef.current;
+      latestProjectedContentRef.current = note.content || '';
     }
-    persistContent(markdownToCommit);
+    richEditPendingRef.current = true;
+    lastRichInputMarkdownRef.current = markdownToCommit;
+    syncLocalContent(markdownToCommit);
+    flushPendingRichEditRef.current(note.id, true);
   };
 
   const handleContentInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
+    const pendingNoteId = richEditNoteIdRef.current;
+    if (pendingNoteId) flushPendingRichEditRef.current(pendingNoteId, pendingNoteId === note?.id);
     lastRichInputMarkdownRef.current = null;
     lastMarkdownSurfaceRef.current = 'source';
     updateContent(e.currentTarget.value);
@@ -1044,6 +1126,7 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
               ref={richMarkdownEditorRef}
               key={note.id}
               markdown={content}
+              projectionVersion={richProjectionVersion}
               onMarkdownInput={handleRichMarkdownInput}
               onMarkdownCommit={handleRichMarkdownCommit}
               onEditorFocus={() => {
