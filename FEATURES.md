@@ -168,6 +168,82 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - [x] Vitest covers group discovery, strict link configuration, history replay, Yjs persistence, delta requests, 250 ms batching, and file deletion tombstones.
   - [ ] A live dev-network smoke test links a CLI profile invited from the browser and observes edits in both directions.
 
+### Filesystem-First Agent and Obsidian Workspaces
+- **Stability**: planned
+- **Description**: A linked notebook behaves like a normal Obsidian-compatible Markdown directory so humans, editors, scripts, and coding agents can collaborate through ordinary filesystem operations without storm.dance-specific editing commands.
+- **Properties**:
+  - The directory is the primary automation interface: creating, reading, rewriting, renaming, moving, or deleting a managed Markdown file maps to the equivalent notebook operation.
+  - The CLI is responsible for lifecycle and diagnostics through commands such as `auth`, `notebooks list`, `link`, `sync`, `watch`, `status`, `doctor`, and `unlink`; routine note authoring does not require `new`, `edit`, or patch commands.
+  - A long-running watcher converts filesystem changes into Yrs transactions, persists them before transmission, and carries the resulting updates through the notebook's XMTP MLS group.
+  - Remote CRDT updates are materialized back to disk with same-directory temporary files, flushes, and atomic renames.
+  - Watcher feedback suppression uses persisted content hashes rather than event timing because filesystem events can be duplicated, coalesced, delayed, or reordered.
+  - A stable note ID, not its filename or title, is the note's identity. A `.stormdance` manifest maps relative paths to note IDs and synchronized hashes; an unobtrusive leading HTML comment makes identity recoverable after moves or copies.
+  - The manifest remains authoritative for an already managed path if an editor or agent accidentally removes the embedded metadata comment.
+  - Notebook folders project to real directories instead of a flat mirror. Paths are normalized and collision-safe without changing stable note IDs.
+  - The linked directory can be opened directly as an Obsidian vault. storm.dance does not require a proprietary Markdown parser or a custom Obsidian plugin for ordinary editing and synchronization.
+  - `.obsidian/`, `.trash/`, and other editor configuration directories are treated as local, unowned data unless a future explicit settings-sync feature is enabled; storm.dance never deletes or interprets them as notes.
+  - Standard Markdown and Obsidian syntax is preserved losslessly when storm.dance does not need to interpret it, including YAML frontmatter, `[[wikilinks]]`, `![[embeds]]`, tags, task lists, callouts, block references, footnotes, and fenced code blocks.
+  - Note metadata does not commandeer user YAML frontmatter. The default identity marker remains an HTML comment, with any future frontmatter integration confined to a namespaced `stormdance` key.
+  - Obsidian-style internal links and relative Markdown links remain readable. File renames must not silently rewrite unrelated prose, and any automatic link rewriting must be explicit, scoped, and tested.
+  - Non-Markdown attachments are preserved as unowned files in the initial native mirror. Cross-device attachment replication requires a separately specified content-addressed asset transport; references must not be destroyed while that transport is unavailable.
+  - Existing metadata-free Markdown files are adopted in place, including nested files, without creating canonical duplicates or flattening the vault.
+  - Reconciliation retains the last materialized base, the current CRDT text, and newly observed filesystem text so a stale whole-file save can be converted into changes against current state instead of blindly replacing concurrent remote edits.
+  - Non-overlapping filesystem and remote edits merge automatically. Ambiguous overlapping edits preserve both versions in clearly named conflict files and surface a diagnostic rather than silently discarding content.
+  - Delete-and-rename save patterns are reconciled before distributed deletion. Confirmed deletes use a configurable grace period and recoverable trash before emitting a CRDT tombstone.
+  - Linked-directory configuration records the notebook ID, XMTP conversation ID, environment, profile, and expected inbox ID. The inbox ID is a safety assertion; the active XMTP client remains its authoritative source.
+  - Copying a vault without its credentials produces a clear profile/inbox diagnostic. Credentials and MLS database material never live inside the shareable vault.
+  - Search and embedding tools can index the vault directly. An optional JSONL change feed may provide stable note IDs and cursors for incremental indexers without becoming a separate editing interface.
+- **Test Criteria**:
+  - [ ] Cross-platform tests cover create, modify, rename, nested move, atomic-save, delete, and remote-materialization behavior.
+  - [ ] Duplicate, coalesced, reordered, and self-generated filesystem events do not create sync loops or duplicate notes.
+  - [ ] A three-way reconciliation test preserves simultaneous browser and stale whole-file agent edits.
+  - [ ] Ambiguous edits and deletions retain recoverable content and never silently destroy the remote or local version.
+  - [ ] An Obsidian fixture vault round-trips frontmatter, wikilinks, embeds, tasks, callouts, block references, code fences, Unicode paths, and nested folders byte-for-byte where no semantic edit occurred.
+  - [ ] `.obsidian/`, attachments, symlinks, unsafe paths, and unowned files are never rewritten or deleted by note synchronization.
+  - [ ] Profile mismatch reports the expected and actual inbox IDs without exposing private key material.
+  - [ ] Obsidian and an ordinary coding agent can edit the same watched vault while a browser collaborator observes convergent changes.
+
+### Native Rust Core, CLI, and Sync Daemon
+- **Stability**: planned
+- **Description**: The current Node CLI evolves into a reusable Rust synchronization core shared by a native CLI, a single-owner background daemon, and the desktop application.
+- **Properties**:
+  - A reusable `storm-core` owns notebook operations without depending on Tauri, React, command-line parsing, or a particular presentation layer.
+  - Native XMTP integration uses a pinned, reviewed `libxmtp` revision and treats upstream database/API upgrades as explicit migrations until a stable published Rust SDK exists.
+  - Yrs applies the same Yjs-compatible update encoding and state-vector protocol used by the browser; Rust does not introduce a second notebook data model.
+  - The native implementation preserves the existing versioned storm.dance envelope, validation bounds, chunking, duplicate tolerance, tombstones, and catch-up behavior.
+  - One process owns a profile's encrypted XMTP database at a time. Short-lived CLI commands use an existing daemon over local IPC or acquire an exclusive profile lock before standalone operation.
+  - Native profiles use OS key storage where available, encrypted portable recovery bundles where requested, and explicit separation between an XMTP inbox and its device installations.
+  - Existing Node-created profiles and databases are migrated from copies with rollback retained; Node and Rust implementations never concurrently open the same database.
+  - Human-readable output is the default for lifecycle commands, while `--json`, JSONL event streams, stable exit codes, and `--no-input` make diagnostics reliable for agents and scripts.
+  - An optional MCP server exposes typed notebook discovery, reading, search, status, and change-subscription operations through the same core. Files remain the preferred interface for authoring.
+- **Test Criteria**:
+  - [ ] Rust can register or recover an XMTP identity, report its inbox/installation IDs, enumerate storm.dance groups, and stream messages on the dev network.
+  - [ ] Committed cross-language fixtures prove Yjs-created state, updates, state vectors, chunks, and tombstones are accepted by Yrs and vice versa.
+  - [ ] TypeScript and Rust replicas converge under concurrent edits, offline catch-up, duplicate delivery, out-of-order chunks, and same-inbox multi-installation delivery.
+  - [ ] Profile locking prevents concurrent database ownership by the daemon, standalone CLI, or desktop process.
+  - [ ] A migration test opens a copied Node-created profile, verifies the same inbox and groups, and leaves the source profile untouched.
+  - [ ] Release CI builds and tests signed native binaries for supported Linux, macOS, and Windows targets.
+
+### Tauri Desktop Application
+- **Stability**: planned
+- **Description**: The existing React notebook experience can run as a Tauri desktop application backed by the native Rust core while the hosted web application remains a complete independent client.
+- **Properties**:
+  - The web application remains first-class: it can create, edit, organize, invite, collaborate, recover state, and operate offline without a desktop daemon or native installation.
+  - Browser clients continue to use Yjs, IndexedDB, and the supported XMTP browser SDK; desktop clients use Yrs, native storage, and `libxmtp` behind the shared compatibility contract.
+  - Web, desktop, CLI, and daemon instances are ordinary XMTP installations that can participate in the same notebook group without routing through one another.
+  - Tauri reuses the React interface but replaces browser persistence and transport adapters with typed native commands, subscriptions, and batched binary CRDT updates.
+  - The editor remains locally responsive: React applies edits immediately, while the Rust core durably persists accepted batches before broadcasting them over XMTP.
+  - Desktop capabilities include OS-keyring credentials, encrypted SQLite state, native vault access, background synchronization, system-tray status, invite notifications, and local search.
+  - The desktop process and daemon share one profile-ownership/IPC design rather than running competing XMTP clients against the same database.
+  - SQLite FTS provides built-in local text search. Embeddings and vector indexes remain optional, replaceable consumers of the Markdown vault or change feed.
+  - Browser identity storage should move from raw EOA material in `localStorage` to an encrypted keystore or wallet/passkey-backed flow with an explicit encrypted recovery format interoperable with native clients.
+- **Test Criteria**:
+  - [ ] Browser-to-browser, browser-to-desktop, browser-to-headless-CLI, and desktop-to-headless-CLI collaboration all converge on the same protocol fixtures and dev network.
+  - [ ] The hosted web app passes its complete feature suite with no native service installed or reachable.
+  - [ ] Tauri restarts offline from native state, accepts edits, and catches up without data loss when XMTP connectivity returns.
+  - [ ] Desktop vault edits made through React, Obsidian, and external agents converge without running duplicate local replicas.
+  - [ ] Packaging tests verify credential permissions, profile locking, auto-update integrity, and clean uninstall behavior without deleting user vaults.
+
 ### IPFS Status and Decentralized Storage
 - **Stability**: in-progress
 - **Description**: The UI surfaces IPFS connectivity and prepares for decentralized note persistence.
@@ -206,7 +282,10 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
 - **Date Handling**: date-fns
 - **Messaging**: `@xmtp/browser-sdk` 5.0.1 and `@xmtp/node-sdk` 6.x
 - **Collaboration**: Yjs 13.x with a versioned, chunked text protocol over XMTP MLS groups
-- **CLI Runtime**: Node.js 22 or newer
+- **Current CLI Runtime**: Node.js 22 or newer
+- **Planned Native Runtime**: Rust with Yrs and a pinned `libxmtp` revision, shared by the CLI, daemon, and Tauri application
+- **Desktop**: Tauri with the existing React UI and typed native adapters; desktop capabilities must not become requirements for the hosted web client
+- **Filesystem Projection**: Obsidian-compatible Markdown vaults with stable note identity, nested folder projection, atomic writes, manifest hashes, and conservative ownership boundaries
 - **Ethereum**: Ethers.js 6
 - **Polyfills**: `vite-plugin-node-polyfills`, `buffer`, `crypto-browserify`, and `stream-browserify`
 
