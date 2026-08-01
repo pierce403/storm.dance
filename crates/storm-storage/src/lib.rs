@@ -1600,20 +1600,25 @@ mod tests {
         let mirror = Mirror::open(directory.path())?;
         mirror.write_link(&config())?;
         let result = mirror.materialize(&snapshot(vec![note("n1", "Design", None)]), 1)?;
-        let path = directory.path().join(&result.manifest.notes["n1"].path);
+        // Mirror::open canonicalizes the root (for example, /var becomes
+        // /private/var on macOS). Build the synthetic notify event from that
+        // canonical root, just as the real watcher does, so the path is not
+        // discarded as outside the vault on platforms where the spelling of
+        // the temporary directory changes during canonicalization.
+        let path = mirror.root().join(&result.manifest.notes["n1"].path);
         let event = Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Content)))
             .add_path(path.clone());
-        assert!(matches!(
+        assert_eq!(
             classify_event(mirror.root(), &mirror.self_hashes, event),
-            MirrorEvent::SelfWrite(_)
-        ));
+            MirrorEvent::SelfWrite(vec![path.clone()])
+        );
         fs::write(&path, "# external\n").map_err(|error| io(&path, error))?;
-        let event =
-            Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Content))).add_path(path);
-        assert!(matches!(
+        let event = Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Content)))
+            .add_path(path.clone());
+        assert_eq!(
             classify_event(mirror.root(), &mirror.self_hashes, event),
-            MirrorEvent::External(_)
-        ));
+            MirrorEvent::External(vec![path])
+        );
         Ok(())
     }
 

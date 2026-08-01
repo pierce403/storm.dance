@@ -55,7 +55,7 @@ jobs:
       run: |
         npm run package:cli
         install_root="$(mktemp -d)"
-        npm install --prefix "$install_root" --ignore-scripts artifacts/storm-dance-*.tgz
+        npm install --prefix "$install_root" --ignore-scripts ./artifacts/storm-dance-*.tgz
         "$install_root/node_modules/.bin/stormdance" --help
         test ! -e "$install_root/node_modules/react"
         test ! -e "$install_root/node_modules/@tauri-apps/api"

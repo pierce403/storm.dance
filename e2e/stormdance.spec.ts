@@ -1,4 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
+
+const { version: appVersion } = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+) as { version: string };
 
 async function openApp(page: Page) {
   await page.route('**/*', async (route) => {
@@ -94,6 +99,12 @@ async function expectTextareaReachesPageBottom(page: Page) {
   expect(bottomGap).toBeLessThanOrEqual(72);
 }
 
+async function waitForNextAnimationFrame(page: Page) {
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  }));
+}
+
 test.describe('storm.dance notes', () => {
   test.beforeEach(async ({ context, page }) => {
     await context.clearCookies();
@@ -182,6 +193,7 @@ test.describe('storm.dance notes', () => {
     const content = page.getByPlaceholder('Start writing your note...');
     const markdown = '# Markdown Heading\n\n- one\n- two\n\n**Bold line**';
     await content.fill(markdown);
+    await expectStoredNote(page, 'Markdown E2E', markdown);
 
     const textMode = page.getByRole('radio', { name: 'Text editor mode' });
     const splitMode = page.getByRole('radio', { name: 'Split editor mode' });
@@ -256,7 +268,9 @@ test.describe('storm.dance notes', () => {
     await page.getByPlaceholder('Note Title').fill('Task List E2E');
 
     const content = page.getByPlaceholder('Start writing your note...');
-    await content.fill('- [ ] Write tests\n- [x] Ship fix');
+    const initialTasks = '- [ ] Write tests\n- [x] Ship fix';
+    await content.fill(initialTasks);
+    await expectStoredNote(page, 'Task List E2E', initialTasks);
 
     await page.getByRole('radio', { name: 'Split editor mode' }).click();
     const richEditor = page.getByRole('textbox', { name: 'Editable rendered markdown' });
@@ -267,10 +281,12 @@ test.describe('storm.dance notes', () => {
     await expect(writeTests).not.toBeChecked();
     await expect(shipFix).toBeChecked();
 
-    await writeTests.check();
+    await writeTests.click();
+    await expect(writeTests).toBeChecked();
     await expect(content).toHaveValue('- [x] Write tests\n- [x] Ship fix');
 
-    await shipFix.uncheck();
+    await shipFix.click();
+    await expect(shipFix).not.toBeChecked();
     const toggledTasks = '- [x] Write tests\n- [ ] Ship fix';
     await expect(content).toHaveValue(toggledTasks);
 
@@ -300,6 +316,7 @@ test.describe('storm.dance notes', () => {
 
     const content = page.getByPlaceholder('Start writing your note...');
     await content.fill('Toolbar text');
+    await expectStoredNote(page, 'Toolbar E2E', 'Toolbar text');
     await page.getByRole('radio', { name: 'Split editor mode' }).click();
 
     const toolbar = page.getByRole('toolbar', { name: 'Markdown formatting toolbar' });
@@ -311,6 +328,7 @@ test.describe('storm.dance notes', () => {
     });
     await page.getByLabel('Markdown block style').selectOption('heading2');
     await expect(content).toHaveValue('## Toolbar text');
+    await waitForNextAnimationFrame(page);
 
     await content.evaluate((textarea: HTMLTextAreaElement) => {
       textarea.focus();
@@ -318,6 +336,7 @@ test.describe('storm.dance notes', () => {
     });
     await toolbar.getByRole('button', { name: 'Bold' }).click();
     await expect(content).toHaveValue('## **Toolbar text**');
+    await waitForNextAnimationFrame(page);
 
     await content.evaluate((textarea: HTMLTextAreaElement) => {
       textarea.focus();
@@ -325,7 +344,10 @@ test.describe('storm.dance notes', () => {
     });
     await page.keyboard.press('Enter');
     await toolbar.getByRole('button', { name: 'Task list' }).click();
-    await expect(content).toHaveValue('## **Toolbar text**\n- [ ] Task');
+    const taskListMarkdown = '## **Toolbar text**\n- [ ] Task';
+    await expect(content).toHaveValue(taskListMarkdown);
+    await waitForNextAnimationFrame(page);
+    await expectStoredNote(page, 'Toolbar E2E', taskListMarkdown);
     await expect(page.getByRole('checkbox', { name: 'Toggle task Task' })).toBeVisible();
 
     await page.getByRole('radio', { name: 'Markdown editor mode' }).click();
@@ -444,7 +466,7 @@ test.describe('storm.dance UX smoke checks', () => {
     await expect(appInfo).toBeVisible();
     await expect(appInfo).toContainText('local-first note-taking app');
     await expect(appInfo).toContainText('Version');
-    await expect(appInfo).toContainText('0.2.0');
+    await expect(appInfo).toContainText(appVersion);
     await expect(appInfo).toContainText('Build time');
     await expect(appInfo).toContainText('Commit');
     await expect(appInfo).toContainText('Runtime');
