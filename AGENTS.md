@@ -115,6 +115,7 @@ When working on this project, update this file whenever you learn something dura
 
 ## Known Issues & Solutions
 - `npm install` may fail in sandboxed environments with `EAI_AGAIN`; rerun with network approval when dependency downloads are required.
+- `yrs` 0.27.3 uses match-arm `if let` guards stabilized in Rust 1.95. Keep the workspace `rust-version` and desktop packaging toolchain at 1.95 or newer unless `yrs` is deliberately changed and the MSRV is retested.
 - The app performs IPFS reachability checks on load. Tests should mock those requests unless the test is specifically about live IPFS connectivity.
 - Browser automation can edit note fields without emitting React `onChange`; note saves should use `input` events as the canonical trigger, and direct automation can use `window.stormdance.setNoteContent(noteId, content)` or related helpers.
 - Rapid title/content edits can race through IndexedDB if saves are allowed to overlap. Preserve the per-note update queue and local merge behavior in `App.tsx` when changing note persistence.

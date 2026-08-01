@@ -449,9 +449,8 @@ function MarkdownContent({ markdown, onTaskToggle }: MarkdownContentProps) {
       return (
         <li {...listItemProps} className="stormdance-task-list-item">
           <input
-            key={`${taskIndex}-${checked ? 'checked' : 'unchecked'}`}
             type="checkbox"
-            defaultChecked={checked}
+            checked={checked}
             aria-label={`Toggle task ${label || taskIndex + 1}`}
             data-markdown-task="true"
             contentEditable={false}

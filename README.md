@@ -36,7 +36,7 @@ The sync design and current limitations are documented in
 - Node.js 22 or newer
 - npm
 - A modern browser with IndexedDB, Web Workers, and WebAssembly
-- Rust 1.88 or newer for the native CLI/core and Tauri development
+- Rust 1.95 or newer for the native CLI/core and Tauri development
 
 ## Web app development
 

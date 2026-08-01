@@ -37,7 +37,18 @@ jobs:
       run: npm run test:e2e:install
 
     - name: Run browser E2E tests
+      id: browser-e2e
+      continue-on-error: true
       run: npm run test:e2e
+
+    - name: Upload browser failure diagnostics
+      if: steps.browser-e2e.outcome == 'failure'
+      uses: actions/upload-artifact@v7
+      with:
+        name: playwright-failure-diagnostics
+        path: test-results/
+        if-no-files-found: ignore
+        retention-days: 7
 
     - name: Smoke-test the distributable XMTP CLI
       shell: bash
@@ -64,3 +75,7 @@ jobs:
       with:
         name: dist
         path: dist/
+
+    - name: Enforce browser E2E result
+      if: steps.browser-e2e.outcome == 'failure'
+      run: exit 1
