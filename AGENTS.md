@@ -95,6 +95,7 @@ When working on this project, update this file whenever you learn something dura
     - Seeding local IndexedDB rows must not force `deleted: false` onto an existing Yjs tombstone.
 - **Node CLI**:
     - `@xmtp/node-sdk` 6.x requires Node.js 22 in local development and CI.
+    - Keep `packages/cli/package.json` at the same version as the root `package.json`; `scripts/stage-cli-package.mjs` rejects mismatches before packaging.
     - CLI identities live in XDG profile directories as encrypted ethers keystores; imports are stdin-only and private material must never appear in flags, output, or attached errors.
     - Linked directories use shared mirror schema 2 under `.stormdance/`; config records the expected inbox ID, Markdown ownership is tracked by a manifest, and symlinks or unowned files must never be deleted.
     - Metadata-free Markdown must be adopted in place through `scanMirror(...).preferredPaths`; writing a second canonical copy causes repeat-import duplicates.
