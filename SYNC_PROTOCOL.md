@@ -24,11 +24,17 @@ in a linked directory are durable replicas of the same Yjs document.
 Each notebook has one `Y.Doc` containing:
 
 - notebook ID, name, creation time, and update time;
+- an additive map of folders keyed by stable folder ID, with `Y.Text` names,
+  parent pointers, timestamps, and deletion tombstones;
 - a map of notes keyed by stable note ID;
 - `Y.Text` values for note title and content;
-- scalar folder ID and timestamps; and
+- scalar note folder IDs and timestamps; and
 - deletion tombstones, so an offline edit cannot silently resurrect a deleted
-  note.
+  note or folder.
+
+Legacy schema-1 documents without the additive `folders` root remain readable.
+Missing, deleted, or self-referential parents project as roots; concurrent
+parent cycles are broken deterministically at the UTF-8-smallest folder ID.
 
 Typing applies a minimal prefix/suffix splice to `Y.Text`. Yjs updates are
 commutative, associative, and idempotent, so duplicate, delayed, and reordered
@@ -105,10 +111,15 @@ ignored, protected, or rejected. Writes use same-directory temporary files,
 flushes, and atomic rename.
 
 Any Markdown indexer, embedding pipeline, or vector database can consume this
-vault without understanding storm.dance. Folder IDs round-trip, and directories
-created outside storm.dance receive stable `obsidian:path:<relative path>` IDs.
-The browser does not yet synchronize folder entities/names, so a replica that
-does not recognize a folder ID shows that note at the notebook root.
+vault without understanding storm.dance. Empty and nested folders round-trip as
+ordinary directories, and directories created outside storm.dance receive
+stable, notebook-scoped `obsidian:path:<encoded-notebook-id>:<encoded-relative-path>`
+IDs. The actual filesystem parent wins
+over stale embedded metadata when a note is moved. Manifest paths preserve
+folder identity when a rename or move is unambiguous, but they are never
+permission for recursive deletion: only real empty directories are retired,
+and symlinks or unowned content are preserved. A replica that encounters an
+unknown legacy folder ID shows that note at the notebook root.
 
 ## Runtime boundaries
 
@@ -130,4 +141,5 @@ does not recognize a folder ID shows that note at the notebook root.
 - Markdown mirror schema: 2 (schema 1 is accepted for migration).
 
 Unknown protocol versions are ignored rather than guessed. A schema change must
-preserve stable notebook/note IDs and include an explicit migration path.
+preserve stable notebook, folder, and note IDs and include an explicit migration
+path.

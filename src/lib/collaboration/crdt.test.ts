@@ -24,6 +24,14 @@ const note = {
   updatedAt: 1,
 };
 
+const folder = {
+  id: 'folder-1',
+  name: 'Research',
+  parentFolderId: null,
+  createdAt: 1,
+  updatedAt: 1,
+};
+
 const synchronize = (left: NotebookCrdt, right: NotebookCrdt) => {
   const leftUpdate = left.encodeDiff(right.encodeStateVector());
   const rightUpdate = right.encodeDiff(left.encodeStateVector());
@@ -121,6 +129,76 @@ describe('NotebookCrdt', () => {
     const content = left.getNote('note-1')?.content;
     expect(content).toContain('LEFT');
     expect(content).toContain('RIGHT');
+  });
+
+  it('synchronizes empty folders, nested moves, and note folder identity', () => {
+    const left = new NotebookCrdt('nb-1');
+    left.seed(notebook, [note], [folder]);
+    const right = new NotebookCrdt('nb-1');
+    right.applyUpdate(left.encodeUpdate());
+
+    left.upsertFolder({
+      id: 'folder-2',
+      name: 'Protocol',
+      parentFolderId: folder.id,
+      createdAt: 2,
+      updatedAt: 2,
+    });
+    left.upsertNote({ ...note, folderId: 'folder-2', updatedAt: 3 });
+    right.applyUpdate(left.encodeDiff(right.encodeStateVector()));
+
+    expect(right.snapshot().folders).toEqual([
+      expect.objectContaining({ id: folder.id, name: folder.name, parentFolderId: null }),
+      expect.objectContaining({ id: 'folder-2', name: 'Protocol', parentFolderId: folder.id }),
+    ]);
+    expect(right.getNote(note.id)?.folderId).toBe('folder-2');
+  });
+
+  it('retains folder tombstones while seeding stale local rows', () => {
+    const crdt = new NotebookCrdt('nb-1');
+    crdt.seed(notebook, [], [folder]);
+    crdt.deleteFolder(folder.id, 2);
+
+    crdt.seed(
+      { ...notebook, updatedAt: 3 },
+      [],
+      [{ ...folder, name: 'Stale local name', updatedAt: 3 }],
+    );
+
+    expect(crdt.getFolder(folder.id)).toMatchObject({
+      name: 'Stale local name',
+      deleted: true,
+      deletedAt: 2,
+    });
+  });
+
+  it('normalizes missing, deleted, self, and concurrent cyclic parents deterministically', () => {
+    const left = new NotebookCrdt('nb-1');
+    left.seed(notebook, [], [
+      { ...folder, id: 'a', name: 'A' },
+      { ...folder, id: 'b', name: 'B' },
+      { ...folder, id: 'missing-child', name: 'Missing child', parentFolderId: 'absent' },
+      { ...folder, id: 'self', name: 'Self', parentFolderId: 'self' },
+      { ...folder, id: 'deleted', name: 'Deleted', deleted: true, deletedAt: 2 },
+      { ...folder, id: 'deleted-child', name: 'Deleted child', parentFolderId: 'deleted' },
+    ]);
+    const right = new NotebookCrdt('nb-1');
+    right.applyUpdate(left.encodeUpdate());
+
+    left.upsertFolder({ ...folder, id: 'a', name: 'A', parentFolderId: 'b', updatedAt: 3 });
+    right.upsertFolder({ ...folder, id: 'b', name: 'B', parentFolderId: 'a', updatedAt: 3 });
+    synchronize(left, right);
+
+    expect(left.snapshot()).toEqual(right.snapshot());
+    const normalized = new Map(left.snapshot().folders.map((candidate) => [
+      candidate.id,
+      candidate.parentFolderId,
+    ]));
+    expect(normalized.get('a')).toBeNull();
+    expect(normalized.get('b')).toBe('a');
+    expect(normalized.get('missing-child')).toBeNull();
+    expect(normalized.get('self')).toBeNull();
+    expect(normalized.get('deleted-child')).toBeNull();
   });
 
   it('accepts duplicate and out-of-order updates idempotently', () => {

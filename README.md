@@ -10,8 +10,8 @@ notebooks can be mirrored into ordinary Obsidian-compatible Markdown vaults.
   backup export.
 - One Yjs document and one XMTP MLS group per collaborative notebook, pinned to
   either the XMTP development or production environment.
-- Concurrent title/content edits, note creation, note deletion tombstones,
-  notebook rename, history replay, and state-vector catch-up.
+- Concurrent title/content edits, note and folder creation, folder moves,
+  deletion tombstones, notebook rename, history replay, and state-vector catch-up.
 - Invite discovery and acceptance through XMTP group consent.
 - A bidirectional Markdown directory mirror suitable for local search,
   embeddings, vector indexing, static-site tooling, or another editor.
@@ -23,7 +23,7 @@ notebooks can be mirrored into ordinary Obsidian-compatible Markdown vaults.
 The deterministic suite covers Yjs/Yrs compatibility, protocol chunking,
 concurrent edits, state-vector repair, native IPC, and filesystem safety. An
 XMTP dev-network workflow on relevant `main` changes exercises the actual web/Tauri collaboration
-session and Node CLI directory-sync code paths with three disposable XMTP
+session and Node CLI directory-sync code paths with four disposable XMTP
 installations. Packaging artifacts are unsigned development builds until the
 platform signing secrets are configured.
 
@@ -131,12 +131,15 @@ commandeering user keys. Existing `.md` files are adopted in place on first
 sync, including nested Obsidian folders. The schema-2 mirror does not follow
 symlinks or delete files it cannot verify it still owns.
 
-Folder IDs and nested paths round-trip with notes, but browser folder entities
-and names are not yet CRDT-synchronized. A browser that does not recognize a
-referenced folder shows the note at the notebook root. The linked config also
-records the expected XMTP inbox ID, so copying a vault to the wrong identity
-fails closed when the Node CLI profile opens it instead of silently joining
-another inbox.
+Folders are first-class Yjs entities: names, parent relationships, empty nested
+directories, note moves, and deletion tombstones synchronize between browser,
+Tauri, and the Node CLI. Ordinary vault directories are adopted for
+Obsidian-compatible and agent-first workflows; a completely empty directory
+rename is represented as delete-and-create because the filesystem carries no
+stable identity marker. A browser that receives an unknown legacy folder ID
+still shows the note at the notebook root. The linked config also records the
+expected XMTP inbox ID, so copying a vault to the wrong identity fails closed
+when the Node CLI profile opens it instead of silently joining another inbox.
 
 ## Native Rust CLI
 

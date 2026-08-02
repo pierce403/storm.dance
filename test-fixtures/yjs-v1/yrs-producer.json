@@ -3,6 +3,7 @@
   "fixtureVersion": 1,
   "fullState": {
     "expectedProjection": {
+      "folders": [],
       "notebook": {
         "createdAt": 1725100000000,
         "id": "rust-fixture-notebook-v1",
@@ -41,6 +42,7 @@
       "encoding": "base64"
     },
     "expectedProjection": {
+      "folders": [],
       "notebook": {
         "createdAt": 1725100000000,
         "id": "rust-fixture-notebook-v1",

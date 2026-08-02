@@ -102,6 +102,13 @@ const fixtures = JSON.parse(readFileSync(
 
 const decodeBinary = (fixture: BinaryFixture) => Uint8Array.from(Buffer.from(fixture.data, 'base64'));
 
+const withLegacyFolders = (
+  projection: NotebookCrdtProjection,
+): NotebookCrdtProjection => ({
+  ...projection,
+  folders: projection.folders ?? [],
+});
+
 const expectValidBinary = (fixture: BinaryFixture) => {
   expect(fixture.encoding).toBe('base64');
   const decoded = decodeBinary(fixture);
@@ -119,6 +126,10 @@ describe('storm.dance cross-language compatibility fixtures', () => {
     expect(fixtures.fixtureFormat).toBe('storm.dance/yjs-v1-fixtures');
     expect(fixtures.fixtureVersion).toBe(1);
     expect(fixtures.contract).toEqual(STORMDANCE_COMPATIBILITY_CONTRACT);
+    expect(STORMDANCE_COMPATIBILITY_CONTRACT.crdt.roots.folders).toMatchObject({
+      name: 'folders',
+      optionalInLegacyDocuments: true,
+    });
     expect(STORMDANCE_COMPATIBILITY_ID).toBe('storm.dance/compatibility');
     expect(STORMDANCE_COMPATIBILITY_VERSION).toBe(1);
   });
@@ -140,7 +151,7 @@ describe('storm.dance cross-language compatibility fixtures', () => {
     const replica = new NotebookCrdt(fixtures.ids.notebookId);
     replica.applyUpdate(decodeBinary(fixtures.cases.fullState.update));
 
-    expect(replica.snapshot()).toEqual(fixtures.cases.fullState.expectedProjection);
+    expect(replica.snapshot()).toEqual(withLegacyFolders(fixtures.cases.fullState.expectedProjection));
     expectStateVector(replica, fixtures.cases.fullState.stateVector);
   });
 
@@ -149,7 +160,7 @@ describe('storm.dance cross-language compatibility fixtures', () => {
       const replica = new NotebookCrdt(fixtures.ids.notebookId);
       replica.applyUpdate(decodeBinary(fixtures.cases.fullState.update));
       replica.applyUpdate(decodeBinary(update));
-      expect(replica.snapshot()).toEqual(fixtures.cases.incremental.expectedProjection);
+      expect(replica.snapshot()).toEqual(withLegacyFolders(fixtures.cases.incremental.expectedProjection));
       expectStateVector(replica, fixtures.cases.incremental.afterStateVector);
     };
 
@@ -163,7 +174,7 @@ describe('storm.dance cross-language compatibility fixtures', () => {
     replica.applyUpdate(decodeBinary(fixtures.cases.incremental.update));
     replica.applyUpdate(decodeBinary(fixtures.cases.tombstone.update));
 
-    expect(replica.snapshot()).toEqual(fixtures.cases.tombstone.expectedProjection);
+    expect(replica.snapshot()).toEqual(withLegacyFolders(fixtures.cases.tombstone.expectedProjection));
     expect(replica.getNote('note-beta')).toMatchObject({ deleted: true });
     expectStateVector(replica, fixtures.cases.tombstone.afterStateVector);
   });
@@ -180,7 +191,7 @@ describe('storm.dance cross-language compatibility fixtures', () => {
     rightFirst.applyUpdate(decodeBinary(fixtures.cases.concurrency.rightUpdate));
     rightFirst.applyUpdate(decodeBinary(fixtures.cases.concurrency.leftUpdate));
 
-    expect(leftFirst.snapshot()).toEqual(fixtures.cases.concurrency.expectedProjection);
+    expect(leftFirst.snapshot()).toEqual(withLegacyFolders(fixtures.cases.concurrency.expectedProjection));
     expect(rightFirst.snapshot()).toEqual(leftFirst.snapshot());
     expectStateVector(leftFirst, fixtures.cases.concurrency.mergedStateVector);
     expectStateVector(rightFirst, fixtures.cases.concurrency.mergedStateVector);

@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -226,20 +226,29 @@ async function loadSharedCollaborationSession() {
 }
 
 async function readMarkdownNote(root, noteId) {
-  const entries = await readdir(root, { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-    const filePath = path.join(root, entry.name);
-    try {
-      const source = await readFile(filePath, 'utf8');
-      const note = parseMirrorNote(source);
-      if (note.id === noteId) return { filePath, note, source };
-    } catch {
-      // A user-authored Markdown file without metadata is adopted on the next
-      // CLI scan, so it is not an error while polling materialization.
+  const visit = async (directory) => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue;
+      const filePath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        const nested = await visit(filePath);
+        if (nested) return nested;
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+      try {
+        const source = await readFile(filePath, 'utf8');
+        const note = parseMirrorNote(source);
+        if (note.id === noteId) return { filePath, note, source };
+      } catch {
+        // A user-authored Markdown file without metadata is adopted on the next
+        // CLI scan, so it is not an error while polling materialization.
+      }
     }
-  }
-  return undefined;
+    return undefined;
+  };
+  return visit(root);
 }
 
 const projectionKey = (projection) => JSON.stringify(projection);
@@ -362,6 +371,66 @@ async function run() {
         );
     });
 
+    // Reproduce the two browser regressions that motivated first-class folder
+    // entities: creating a folder and dragging a note into it. The same update
+    // must materialize as a real directory in the CLI vault and project into
+    // the Tauri webview session.
+    const sharedFolderId = randomUUID();
+    webSession.upsertLocalFolder({
+      id: sharedFolderId,
+      notebookId,
+      name: 'Shared research',
+      parentFolderId: null,
+      createdAt: startedAt + 1,
+      updatedAt: startedAt + 1,
+      deleted: false,
+      deletedAt: null,
+    });
+    const noteBeforeFolderMove = webSession.projection.notes.find(
+      (note) => note.id === noteId,
+    );
+    assert.ok(noteBeforeFolderMove, 'The web session must retain the seeded note');
+    webSession.upsertLocalNote({
+      ...noteBeforeFolderMove,
+      notebookId,
+      folderId: sharedFolderId,
+      updatedAt: startedAt + 1,
+    });
+
+    await retry('browser folder creation and note drag reach CLI and Tauri', async () => {
+      const markdown = await readMarkdownNote(vault, noteId);
+      const relativePath = markdown
+        ? path.relative(vault, markdown.filePath).split(path.sep).join('/')
+        : '';
+      const tauriFolder = tauriSession.projection.folders.find(
+        (folder) => folder.id === sharedFolderId,
+      );
+      const tauriNote = tauriSession.projection.notes.find((note) => note.id === noteId);
+      return relativePath.startsWith('Shared research/')
+        && markdown?.note.folderId === sharedFolderId
+        && tauriFolder?.name === 'Shared research'
+        && tauriNote?.folderId === sharedFolderId;
+    });
+
+    // The reverse direction must also work for agent workflows: an ordinary
+    // empty directory created in the vault becomes a shared folder entity.
+    await mkdir(path.join(vault, 'Agent inbox'));
+    await cliSession.scanNow();
+    const agentFolder = await retry('CLI-created empty directory reaches web and Tauri', () => {
+      const cliFolder = cliSession.projection.folders.find(
+        (folder) => folder.name === 'Agent inbox' && folder.parentFolderId === null,
+      );
+      const webFolder = webSession.projection.folders.find(
+        (folder) => folder.id === cliFolder?.id,
+      );
+      const tauriFolder = tauriSession.projection.folders.find(
+        (folder) => folder.id === cliFolder?.id,
+      );
+      return cliFolder && webFolder?.name === cliFolder.name && tauriFolder?.name === cliFolder.name
+        ? cliFolder
+        : undefined;
+    });
+
     // Add a fourth, independently persisted XMTP identity only after the
     // notebook group and all three primary component sessions are live. This
     // covers the settings-style contributor lifecycle instead of relying only
@@ -421,7 +490,15 @@ async function run() {
 
     await retry('dynamic contributor catches up through the shared session', () => (
       contributorSession.projection.notes.some(
-        (note) => note.id === noteId && note.content === initialNote.content,
+        (note) => note.id === noteId
+          && note.content === initialNote.content
+          && note.folderId === sharedFolderId,
+      )
+      && contributorSession.projection.folders.some(
+        (folder) => folder.id === sharedFolderId && folder.name === 'Shared research',
+      )
+      && contributorSession.projection.folders.some(
+        (folder) => folder.id === agentFolder.id && folder.name === 'Agent inbox',
       )
     ));
 
@@ -611,8 +688,9 @@ async function run() {
         },
       ],
       filesystem: {
-        materializedFile: path.basename(finalMarkdown.filePath),
+        materializedFile: path.relative(vault, finalMarkdown.filePath).split(path.sep).join('/'),
         title: finalMarkdown.note.title,
+        synchronizedFolders: projections[0].folders.map((folder) => folder.name),
       },
       convergedContent: content,
       elapsedMs: Date.now() - startedAt,

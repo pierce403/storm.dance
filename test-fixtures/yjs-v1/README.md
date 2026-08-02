@@ -5,10 +5,13 @@ contract version 1. Binary values use canonical padded base64 and include their
 decoded byte length and SHA-256 digest. A consumer must verify those values
 before applying an update.
 
-The CRDT document has two top-level shared maps:
+The CRDT document has three top-level shared maps:
 
 - `notebook`: a `Y.Map` containing `schemaVersion`, `id`, `name`, `createdAt`,
   and `updatedAt`.
+- `folders`: an additive `Y.Map<folderId, Y.Map>` whose entries contain a
+  `Y.Text` name, `parentFolderId`, timestamps, and deletion tombstones. Legacy
+  schema-1 updates without this optional root remain valid.
 - `notes`: a `Y.Map<noteId, Y.Map>` whose entries contain `Y.Text` values for
   `title` and `content`, plus `folderId`, `createdAt`, `updatedAt`, `deleted`,
   and `deletedAt` scalar values.
@@ -26,8 +29,9 @@ must agree on every logical-message field before reassembly.
 The fixture cases cover:
 
 - complete state and its state vector;
-- an incremental update and state-vector-derived delta;
-- a retained deletion tombstone;
+- an incremental update and state-vector-derived delta, including a nested
+  folder entity;
+- retained note and folder deletion tombstones;
 - concurrent prefix/suffix edits from two deterministic client IDs;
 - an update split into wire chunks with duplicate, out-of-order delivery; and
 - all four wire message kinds: manifest, state-vector sync request, update, and

@@ -28,6 +28,7 @@ fn projection(content: &str, updated_at: u64) -> serde_json::Value {
             "createdAt": BASE_TIMESTAMP,
             "updatedAt": updated_at,
         },
+        "folders": [],
         "notes": [{
             "id": "rust-note",
             "title": "Native interoperability",

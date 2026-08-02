@@ -21,8 +21,9 @@ artifacts.
 
 “Required” in the matrices below is a release-contract target, not a claim that
 the row currently passes. The 0.2 development checkpoint automates the shared
-Yjs/Yrs fixtures, protocol bounds, browser/CLI simulated transport, schema-2
-nested vault safety (including exact scan-witness revalidation), hosted-web
+Yjs/Yrs fixtures, protocol bounds, browser/CLI simulated transport, first-class
+folder CRDT projection, schema-2 nested/empty vault safety (including exact
+scan-witness revalidation), hosted-web
 fallback, typed Tauri bridge behavior, the live
 four-installation smoke below, and unsigned package builds. Direct native
 libxmtp, installed-artifact launch tests, profile locking, semantic three-way
@@ -39,10 +40,10 @@ code paths rather than manually labelled CRDT replicas:
 
 | Role | Code exercised | Live assertion |
 |---|---|---|
-| Hosted web | `NotebookCollaborationSession` | Creates the notebook group and snapshot; receives concurrent native edits; sends a later rename |
-| Directory CLI | `NotebookDirectorySync` with `adaptXmtpGroup` | Materializes Markdown, ingests an ordinary file write, sends its Yjs delta, and materializes the later web rename |
-| Tauri webview | `NotebookCollaborationSession` | Receives the snapshot, concurrently edits another text region, and receives the later web rename |
-| Dynamic contributor | `NotebookCollaborationSession` plus native XMTP group roles | Joins only after the three primary sessions are live, catches up, edits and converges, then completes Member → Admin → Member → removed lifecycle checks |
+| Hosted web | `NotebookCollaborationSession` | Creates the notebook group/snapshot and a folder, moves a note into it, receives concurrent edits, observes the CLI-created empty folder, and sends a later note rename |
+| Directory CLI | `NotebookDirectorySync` with `adaptXmtpGroup` | Materializes the web folder and moved note as nested Markdown, ingests an ordinary file write, publishes an ordinary empty root directory as a folder entity, and materializes the later web note rename |
+| Tauri webview | `NotebookCollaborationSession` | Receives the snapshot, web-created folder/note move, and CLI-created empty folder; concurrently edits another text region and receives the later note rename |
+| Dynamic contributor | `NotebookCollaborationSession` plus native XMTP group roles | Joins only after the three primary sessions are live, catches up with the moved note and both folder entities, edits and converges, then completes Member → Admin → Member → removed lifecycle checks |
 
 The web and Tauri roles intentionally share `NotebookCollaborationSession`
 because the packaged Tauri application hosts the same React collaboration
@@ -55,6 +56,14 @@ frontend, contributor lifecycle, and directory CLI transport paths over the
 real XMTP dev network; it does not by itself claim
 that installer launch, native IPC, same-inbox topology, or every scenario below
 has passed. Those remain separate matrix rows and release gates.
+
+The live smoke also covers two exact folder paths: web creates a root folder and
+moves a note into it for CLI Markdown/Tauri projection, and CLI creates an empty
+root directory for web/Tauri projection and late-contributor catch-up. It does
+not yet cover nested empty directories, folder/directory rename or parent move,
+filesystem note moves back to the browser, or deletion/reparenting. Those T2
+cells remain live-network gates even though their components have deterministic
+coverage.
 
 ## Compatibility fixture gate
 
@@ -123,7 +132,41 @@ Every client-pair row runs this scenario set:
 | CS-09 | A closes during send and restarts from durable state | Restart catches up without losing accepted edits or re-sending unbounded duplicates |
 | CS-10 | History delivery overlaps live-stream startup | A boundary message is applied exactly once; no history/live gap exists |
 | CS-11 | Notebook name and note metadata change with body text | Metadata and text project consistently on both sides |
-| CS-12 | Unknown folder ID arrives | Note remains visible at root until folder entities are supported; content is not discarded |
+| CS-12 | A note references a missing or tombstoned folder entity | Note remains visible at root; a later valid folder update nests it without losing content |
+| CS-13 | Empty/nested folder create, rename, parent move, tombstone, and note move occur | Stable folder/note IDs, names, safe parent tree, and visibility converge on both replicas |
+
+## Folder synchronization matrix
+
+“Browser” covers both the hosted application and the shared React/Yjs session
+inside Tauri. “CLI” covers the shipped Node XMTP directory client; the Rust/Yrs
+mirror must satisfy the same filesystem results for Tauri/native use. An
+“Automated” cell names committed deterministic T0/T1 coverage. “Partial” means
+the underlying CRDT and mirror components are covered but the complete source
+UI/filesystem-to-receiver path still needs one integrated test. A “Covered” T2
+cell names the exact assertion in `scripts/live-xmtp-matrix.mjs`; all other live
+cells remain pending and are not inferred from simulated transport.
+
+| ID | Direction | Source operation | Required receiver result | T0/T1 deterministic | T2 XMTP live |
+|---|---|---|---|---|---|
+| FD-01 | Browser → Browser | Create a root folder before a subsequent note move | Folder ID/name/parent project into the Tauri-shaped replica and a late contributor's catch-up state | Automated: CRDT and simulated session | Covered: web → Tauri and late contributor |
+| FD-02 | Browser → Browser | Create an empty nested folder | Folder IDs, names, parents, and empty nodes appear without placeholder notes | Automated: CRDT | Pending |
+| FD-03 | Browser → Browser | Rename a folder or move it under another folder | Both replicas derive the same cycle-safe hierarchy with stable IDs | Automated: CRDT; integrated UI move pending | Pending |
+| FD-04 | Browser → Browser | Drag a note into or between folders | The same note ID projects beneath the destination folder and survives catch-up/reload | Automated: CRDT/session plus local Playwright drag/reload | Covered: web → Tauri and late contributor |
+| FD-05 | Browser → Browser | Delete a folder | Folder tombstone converges; child notes/folders reparent to its parent and remain visible | Partial: tombstone automated; UI reparent integration pending | Pending |
+| FD-06 | Browser → CLI | Create a folder and drag a note into it | CLI materializes an owned Markdown file under the projected real directory with matching folder metadata | Automated: Node and Rust materializers | Covered: web → CLI |
+| FD-07 | Browser → CLI | Create an empty root or nested folder with no note | Node and Rust create the real empty directory and record folder ID/path ownership | Automated: Node and Rust materializers | Pending |
+| FD-08 | Browser → CLI | Rename or move a folder | Owned directories/notes relocate to the collision-safe projected path with stable IDs | Partial: Node/Rust projection components; end-to-end Node rename/move pending | Pending |
+| FD-09 | Browser → CLI | Delete a folder after reparenting children | Manifest drops the tombstoned folder; only empty real retired directories are removed | Automated: Node ownership/unowned-content tests; Rust materializer | Pending |
+| FD-10 | CLI → Browser | Create an empty root directory | A stable folder entity is published to web/Tauri and survives late-contributor catch-up without a note | Automated: directory sync | Covered: CLI → web/Tauri and late contributor |
+| FD-11 | CLI → Browser | Create an empty nested directory | A stable name/parent entity appears under the matching browser/Tauri folder | Automated: Node/Rust scan components | Pending |
+| FD-12 | CLI → Browser | Rename or move a directory | Manifest identity is retained when unambiguous; folder name/parent updates appear remotely | Automated: Node/Rust scan components; full receiver integration pending | Pending |
+| FD-13 | CLI → Browser | Move a managed Markdown note between directories | Actual parent directory replaces stale embedded metadata; browser moves the same note ID | Automated: Node/Rust scan components; full receiver integration pending | Pending |
+| FD-14 | CLI → Browser | Delete an empty managed directory | One folder tombstone is published; browser reparents/roots surviving content without resurrection | Partial: scanner/tombstone components; explicit directory-sync deletion test pending | Pending |
+
+Every folder row must additionally assert that `.obsidian/`, attachments,
+unowned Markdown, symlinks/junctions, and non-empty directories are neither
+followed nor deleted. Directory removal is never recursive. Node and Rust must
+agree on the shared folder projection before a Tauri/native row can pass.
 
 ## Identity, group, and lifecycle matrix
 
@@ -218,6 +261,10 @@ CLI command.
 | FS-18 | Daemon crashes between temp write, flush, rename, and manifest update | Recovery chooses a complete version; no truncated Markdown or lost remote state | Required | Required | Required |
 | FS-19 | Vault is copied without profile credentials | Markdown remains usable; sync fails with actionable profile/inbox guidance | Required | Required | Required |
 | FS-20 | Two processes attempt to watch the same vault/profile | One owner; no competing materializers or database access | Required | Required | Required |
+| FS-21 | Create empty root and nested directories | Publish stable folder entities with names/parents even when no Markdown note exists | Required | Required | Required |
+| FS-22 | Rename or move a managed directory tree | Preserve unambiguous folder IDs; publish name/parent changes and keep descendant note IDs | Required | Required | Required |
+| FS-23 | Remote folder create/rename/move and note drag | Materialize the matching real directory tree and relocate only owned Markdown files | Required | Required | Required |
+| FS-24 | Local or remote folder deletion | Emit/apply one tombstone and remove only real empty directories; preserve symlinks and all unowned content | Required | Required | Required |
 
 ### Obsidian syntax preservation corpus
 
@@ -250,6 +297,7 @@ may change only the intended region and storm.dance identity marker.
 | CL-08 | JSONL change feed resumes from cursor | Exactly-once logical events or documented at-least-once IDs permit deduplication | T1 |
 | CL-09 | Agent uses `rg`, editor, copy, move, and delete directly | All authoring works through filesystem projection; no edit command is required | T1/T2 |
 | CL-10 | SIGINT/SIGTERM or console close | Flush accepted state, stop streams/watchers, release database and vault locks | T1/T3 |
+| CL-11 | Agent creates, renames, moves, or removes ordinary directories | First-class folder deltas round-trip with stable IDs where identity is unambiguous; no placeholder note or edit command is required | T1/T2 |
 
 ## Tauri and native IPC matrix
 
@@ -265,6 +313,7 @@ may change only the intended region and storm.dance identity marker.
 | TA-08 | Built-in FTS indexes a remote/local update and tombstone | Search results update transactionally and omit deleted notes by default | T1 |
 | TA-09 | Optional embedding provider is absent/fails | Notes, FTS, editing, and sync remain operational | T1 |
 | TA-10 | Native capability is denied by OS/user | UI reports the denied capability and keeps unrelated features available | T1/T3 |
+| TA-11 | React or external vault actor changes a folder tree | Complete Yjs state carries folder entities across typed IPC; React and Rust converge on the same nested/empty directory projection without an echo loop | T1/T2 |
 
 ## Packaging and installation matrix
 
@@ -317,7 +366,7 @@ A cross-platform release is ready only when:
 1. All CF tests pass in both TypeScript/Yjs and Rust/Yrs from the same fixture.
 2. All CP pairings pass T1; CP-01 through CP-08 pass live on XMTP dev.
 3. The full hosted web suite passes with no native service present.
-4. Filesystem tests FS-01 through FS-20 and Obsidian tests OB-01 through OB-08
+4. Filesystem tests FS-01 through FS-24 and Obsidian tests OB-01 through OB-08
    pass on Linux, macOS, and Windows.
 5. The shipped platform artifacts pass their PK row plus TA-05 and TA-06.
 6. No test loses a note silently. Ambiguous conflicts and deletions retain a

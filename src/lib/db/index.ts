@@ -421,6 +421,42 @@ export const dbService = {
     return updatedFolder;
   },
 
+  async upsertExternalFolder(folder: Folder): Promise<Folder> {
+    const db = await this.getDb();
+    const tx = db.transaction('folders', 'readwrite');
+    const store = tx.objectStore('folders');
+    const existing = await store.get(folder.id);
+    if (existing && existing.notebookId !== folder.notebookId) {
+      await tx.done;
+      throw new Error(`Folder ${folder.id} belongs to notebook ${existing.notebookId}, not ${folder.notebookId}`);
+    }
+    await store.put(folder);
+    await tx.done;
+    return folder;
+  },
+
+  async deleteExternalFolder(id: string, expectedNotebookId: string): Promise<boolean> {
+    const db = await this.getDb();
+    const tx = db.transaction('folders', 'readwrite');
+    const store = tx.objectStore('folders');
+    const existing = await store.get(id);
+    if (!existing) {
+      await tx.done;
+      return false;
+    }
+    if (existing.notebookId !== expectedNotebookId) {
+      await tx.done;
+      throw new Error(`Folder ${id} belongs to notebook ${existing.notebookId}, not ${expectedNotebookId}`);
+    }
+    // Remote projections materialize the complete folder/note graph. Do not
+    // perform the local deleteFolder reparenting side effects here: the
+    // projected child folders and notes are persisted through their own
+    // serialized queues.
+    await store.delete(id);
+    await tx.done;
+    return true;
+  },
+
   async deleteFolder(id: string): Promise<boolean> {
     const db = await this.getDb();
     const folderToDelete = await db.get('folders', id);

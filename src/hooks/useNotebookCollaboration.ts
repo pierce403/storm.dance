@@ -13,6 +13,7 @@ import {
 import {
   NotebookCollaborationSession,
   parseGroupDescription,
+  type FolderShape,
   type NoteShape,
   type XmtpClientLike,
   type XmtpGroupLike,
@@ -397,7 +398,11 @@ export function useNotebookCollaboration({
           if (persisted?.state.byteLength) {
             crdt.applyUpdate(new Uint8Array(persisted.state));
           } else {
-            crdt.seed(notebook, await dbService.getAllNotes(note.notebookId));
+            const [notes, folders] = await Promise.all([
+              dbService.getAllNotes(note.notebookId),
+              dbService.getAllFolders(note.notebookId),
+            ]);
+            crdt.seed(notebook, notes, folders);
           }
           // The app broadcasts optimistically before its IndexedDB write, so
           // the passed value—not the materialized row—is the newest local edit.
@@ -412,6 +417,105 @@ export function useNotebookCollaboration({
           if (binding.conversationId) {
             await applyNativeNotebookState(
               note.notebookId,
+              binding.conversationId,
+              binding.env,
+              mergedState,
+            );
+          }
+        } finally {
+          crdt.destroy();
+        }
+      });
+    statePersistenceQueueRef.current = queued;
+    return queued;
+  }, []);
+
+  const persistInactiveLocalFolder = useCallback((folder: FolderShape) => {
+    const queued = statePersistenceQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const [notebook, states] = await Promise.all([
+          dbService.getNotebook(folder.notebookId),
+          loadEnvironmentStates(folder.notebookId),
+        ]);
+        if (!notebook) return;
+        const binding = resolveSoleNotebookBinding(notebook, asBindingStates(states));
+        if (!binding) return;
+        const persisted = stateForEnvironment(states, binding.env);
+
+        const crdt = new NotebookCrdt(folder.notebookId);
+        try {
+          if (persisted?.state.byteLength) {
+            crdt.applyUpdate(new Uint8Array(persisted.state));
+          } else {
+            const [notes, folders] = await Promise.all([
+              dbService.getAllNotes(folder.notebookId),
+              dbService.getAllFolders(folder.notebookId),
+            ]);
+            crdt.seed(notebook, notes, folders);
+          }
+          // Folder mutations are broadcast optimistically, so the supplied
+          // value is newer than any IndexedDB row loaded above.
+          crdt.upsertFolder(folder);
+          const mergedState = crdt.encodeUpdate();
+          await dbService.putCollaborationState(
+            folder.notebookId,
+            copyArrayBuffer(mergedState),
+            binding.conversationId,
+            binding.env,
+          );
+          if (binding.conversationId) {
+            await applyNativeNotebookState(
+              folder.notebookId,
+              binding.conversationId,
+              binding.env,
+              mergedState,
+            );
+          }
+        } finally {
+          crdt.destroy();
+        }
+      });
+    statePersistenceQueueRef.current = queued;
+    return queued;
+  }, []);
+
+  const persistInactiveFolderDelete = useCallback((folder: FolderShape, deletedAt: number) => {
+    const queued = statePersistenceQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const [notebook, states] = await Promise.all([
+          dbService.getNotebook(folder.notebookId),
+          loadEnvironmentStates(folder.notebookId),
+        ]);
+        if (!notebook) return;
+        const binding = resolveSoleNotebookBinding(notebook, asBindingStates(states));
+        if (!binding) return;
+        const persisted = stateForEnvironment(states, binding.env);
+
+        const crdt = new NotebookCrdt(folder.notebookId);
+        try {
+          if (persisted?.state.byteLength) {
+            crdt.applyUpdate(new Uint8Array(persisted.state));
+            if (!crdt.getFolder(folder.id)) crdt.upsertFolder(folder);
+          } else {
+            const [notes, folders] = await Promise.all([
+              dbService.getAllNotes(folder.notebookId),
+              dbService.getAllFolders(folder.notebookId),
+            ]);
+            crdt.seed(notebook, notes, folders);
+          }
+          crdt.deleteFolder(folder.id, deletedAt);
+          const mergedState = crdt.encodeUpdate();
+          await dbService.putCollaborationState(
+            folder.notebookId,
+            copyArrayBuffer(mergedState),
+            binding.conversationId,
+            binding.env,
+          );
+          if (binding.conversationId) {
+            await applyNativeNotebookState(
+              folder.notebookId,
               binding.conversationId,
               binding.env,
               mergedState,
@@ -445,7 +549,13 @@ export function useNotebookCollaboration({
         const crdt = new NotebookCrdt(notebookId);
         try {
           if (persisted?.state.byteLength) crdt.applyUpdate(new Uint8Array(persisted.state));
-          else crdt.seed(notebook, await dbService.getAllNotes(notebookId));
+          else {
+            const [notes, folders] = await Promise.all([
+              dbService.getAllNotes(notebookId),
+              dbService.getAllFolders(notebookId),
+            ]);
+            crdt.seed(notebook, notes, folders);
+          }
           crdt.updateNotebook({ name, updatedAt });
           const mergedState = crdt.encodeUpdate();
           await dbService.putCollaborationState(
@@ -553,6 +663,7 @@ export function useNotebookCollaboration({
     const loadNotebook = () => Promise.all([
       dbService.getNotebook(notebookId),
       dbService.getAllNotes(notebookId),
+      dbService.getAllFolders(notebookId),
       loadEnvironmentStates(notebookId),
     ] as const);
     let loaded: Awaited<ReturnType<typeof loadNotebook>>;
@@ -562,7 +673,7 @@ export function useNotebookCollaboration({
       if (!isCurrent()) return null;
       throw error;
     }
-    const [notebook, notes, states] = loaded;
+    const [notebook, notes, folders, states] = loaded;
     if (!isCurrent()) return null;
     if (!notebook) throw new Error(`Notebook ${notebookId} was not found locally`);
     const binding = resolveSoleNotebookBinding(notebook, asBindingStates(states));
@@ -575,6 +686,7 @@ export function useNotebookCollaboration({
     const collabSession = new NotebookCollaborationSession({
       notebook: { id: notebook.id, name: notebookName || notebook.name, createdAt: notebook.createdAt, updatedAt: notebook.updatedAt },
       notes,
+      folders,
       client,
       initialState: persisted ? new Uint8Array(persisted.state) : undefined,
       conversationId,
@@ -811,6 +923,29 @@ export function useNotebookCollaboration({
     });
   }, [persistInactiveLocalNote]);
 
+  const broadcastLocalFolderUpdate = useCallback((folder: FolderShape) => {
+    const activeSession = sessionRef.current;
+    if (activeSession?.notebookId === folder.notebookId) {
+      activeSession.upsertLocalFolder(folder);
+      return;
+    }
+    void persistInactiveLocalFolder(folder).catch((error) => {
+      console.warn('Could not persist an offline collaborative folder update', error);
+    });
+  }, [persistInactiveLocalFolder]);
+
+  const broadcastLocalFolderDelete = useCallback(async (
+    folder: FolderShape,
+    deletedAt = Date.now(),
+  ) => {
+    const activeSession = sessionRef.current;
+    if (activeSession?.notebookId === folder.notebookId) {
+      activeSession.deleteLocalFolder(folder.id, deletedAt);
+      return;
+    }
+    await persistInactiveFolderDelete(folder, deletedAt);
+  }, [persistInactiveFolderDelete]);
+
   const broadcastLocalDelete = useCallback(async (note: NoteShape, deletedAt = Date.now()) => {
     const activeSession = sessionRef.current;
     if (activeSession?.notebookId === note.notebookId) {
@@ -839,7 +974,11 @@ export function useNotebookCollaboration({
             crdt.applyUpdate(new Uint8Array(persisted.state));
             if (!crdt.getNote(note.id)) crdt.upsertNote(note);
           } else {
-            crdt.seed(notebook, await dbService.getAllNotes(note.notebookId));
+            const [notes, folders] = await Promise.all([
+              dbService.getAllNotes(note.notebookId),
+              dbService.getAllFolders(note.notebookId),
+            ]);
+            crdt.seed(notebook, notes, folders);
           }
           crdt.deleteNote(note.id, deletedAt);
           const mergedState = crdt.encodeUpdate();
@@ -994,6 +1133,8 @@ export function useNotebookCollaboration({
     stopCollaboration,
     broadcastLocalUpdate,
     broadcastLocalDelete,
+    broadcastLocalFolderUpdate,
+    broadcastLocalFolderDelete,
     broadcastNotebookRename,
     applyNativeUpdate,
     inviteModalOpen,

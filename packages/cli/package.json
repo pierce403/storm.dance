@@ -1,6 +1,6 @@
 {
   "name": "storm-dance",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Filesystem-first XMTP and Yjs synchronization for storm.dance notebooks",
   "license": "Apache-2.0",
   "repository": {

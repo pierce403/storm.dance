@@ -236,8 +236,8 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
   const getNotesInFolder = useCallback((folderId: string | null) => notes.filter((note) => {
     if (note.notebookId !== selectedNotebookId) return false;
     if (folderId !== null) return note.folderId === folderId;
-    // Folder entities are not in the CRDT yet. Keep a remotely synchronized
-    // note visible at the root when this replica does not know its folder ID.
+    // Keep a note visible at the root if it references a folder this replica
+    // does not know (for example, while upgrading an older persisted state).
     return note.folderId === null || !selectedFolderIds.has(note.folderId);
   }).sort((a, b) => (a.title || '').localeCompare(b.title || '')), [notes, selectedFolderIds, selectedNotebookId]);
 

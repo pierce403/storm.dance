@@ -2,6 +2,7 @@ import * as Y from 'yjs';
 import type { CrdtUpdatePayload } from './types.js';
 import {
   NOTEBOOK_CRDT_GUID_PREFIX,
+  NOTEBOOK_CRDT_FOLDERS_MAP,
   NOTEBOOK_CRDT_METADATA_MAP,
   NOTEBOOK_CRDT_NOTES_MAP,
   NOTEBOOK_CRDT_SCHEMA_VERSION,
@@ -19,6 +20,7 @@ export const LOCAL_CRDT_ORIGIN = Symbol('stormdance-local-crdt-update');
 export const REMOTE_CRDT_ORIGIN = Symbol('stormdance-remote-crdt-update');
 
 type NoteMap = Y.Map<unknown>;
+type FolderMap = Y.Map<unknown>;
 
 export interface NotebookSeed {
   id: string;
@@ -49,9 +51,30 @@ export interface CrdtNoteProjection {
   deletedAt: number | null;
 }
 
+export interface CrdtFolderInput {
+  id: string;
+  name: string;
+  parentFolderId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  deleted?: boolean;
+  deletedAt?: number | null;
+}
+
+export interface CrdtFolderProjection {
+  id: string;
+  name: string;
+  parentFolderId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  deleted: boolean;
+  deletedAt: number | null;
+}
+
 export interface NotebookCrdtProjection {
   schemaVersion: typeof NOTEBOOK_CRDT_SCHEMA_VERSION;
   notebook: NotebookSeed;
+  folders: CrdtFolderProjection[];
   notes: CrdtNoteProjection[];
 }
 
@@ -116,12 +139,12 @@ const readNullableNumber = (map: NoteMap, key: string) => {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 };
 
-const getText = (note: NoteMap, key: 'title' | 'content') => {
+const getText = (note: NoteMap | FolderMap, key: 'title' | 'content' | 'name') => {
   const value = note.get(key);
   return value instanceof Y.Text ? value : undefined;
 };
 
-const ensureText = (note: NoteMap, key: 'title' | 'content') => {
+const ensureText = (note: NoteMap | FolderMap, key: 'title' | 'content' | 'name') => {
   const existing = getText(note, key);
   if (existing) return existing;
 
@@ -409,6 +432,7 @@ export class NotebookCrdt {
   readonly doc: Y.Doc;
   readonly notebookId: string;
   private readonly metadata: Y.Map<unknown>;
+  private readonly folders: Y.Map<FolderMap>;
   private readonly notes: Y.Map<NoteMap>;
 
   constructor(notebookId: string, doc?: Y.Doc) {
@@ -416,6 +440,7 @@ export class NotebookCrdt {
     this.notebookId = notebookId;
     this.doc = doc ?? new Y.Doc({ guid: `${NOTEBOOK_CRDT_GUID_PREFIX}${notebookId}` });
     this.metadata = this.doc.getMap(NOTEBOOK_CRDT_METADATA_MAP);
+    this.folders = this.doc.getMap<FolderMap>(NOTEBOOK_CRDT_FOLDERS_MAP);
     this.notes = this.doc.getMap<NoteMap>(NOTEBOOK_CRDT_NOTES_MAP);
 
     const storedNotebookId = this.metadata.get('id');
@@ -425,7 +450,11 @@ export class NotebookCrdt {
   }
 
   /** Seeds a new document or idempotently upserts an existing local notebook. */
-  seed(notebook: NotebookSeed, notes: CrdtNoteInput[] = []) {
+  seed(
+    notebook: NotebookSeed,
+    notes: CrdtNoteInput[] = [],
+    folders: CrdtFolderInput[] = [],
+  ) {
     if (notebook.id !== this.notebookId) {
       throw new Error(`Cannot seed notebook ${notebook.id} into ${this.notebookId}`);
     }
@@ -442,10 +471,77 @@ export class NotebookCrdt {
       }
       this.metadata.set('updatedAt', notebook.updatedAt);
 
+      for (const folder of folders) {
+        this.upsertFolderInCurrentTransaction(folder);
+      }
       for (const note of notes) {
         this.upsertNoteInCurrentTransaction(note);
       }
     }, LOCAL_CRDT_ORIGIN);
+  }
+
+  /**
+   * Creates or updates a folder. Omitting `deleted` preserves an existing
+   * tombstone, matching note seeding and update behavior.
+   */
+  upsertFolder(folder: CrdtFolderInput) {
+    this.doc.transact(() => {
+      this.upsertFolderInCurrentTransaction(folder);
+    }, LOCAL_CRDT_ORIGIN);
+  }
+
+  private upsertFolderInCurrentTransaction(folder: CrdtFolderInput) {
+    requireNonEmptyString(folder.id, 'folder.id');
+    requireNonEmptyString(folder.name, 'folder.name');
+    requireTimestamp(folder.createdAt, 'folder.createdAt');
+    requireTimestamp(folder.updatedAt, 'folder.updatedAt');
+    if (folder.parentFolderId !== null) {
+      requireNonEmptyString(folder.parentFolderId, 'folder.parentFolderId');
+    }
+    if (folder.deletedAt !== undefined && folder.deletedAt !== null) {
+      requireTimestamp(folder.deletedAt, 'folder.deletedAt');
+    }
+
+    let folderMap = this.folders.get(folder.id);
+    const isNew = !folderMap;
+    if (!folderMap) {
+      folderMap = new Y.Map<unknown>();
+      this.folders.set(folder.id, folderMap);
+    }
+
+    applyMinimalStringDiff(ensureText(folderMap, 'name'), folder.name);
+    folderMap.set('parentFolderId', folder.parentFolderId);
+    if (isNew || folderMap.get('createdAt') === undefined) {
+      folderMap.set('createdAt', folder.createdAt);
+    }
+    folderMap.set('updatedAt', folder.updatedAt);
+
+    if (isNew) {
+      folderMap.set('deleted', folder.deleted ?? false);
+      folderMap.set('deletedAt', folder.deletedAt ?? null);
+    } else if (folder.deleted !== undefined) {
+      folderMap.set('deleted', folder.deleted);
+      folderMap.set('deletedAt', folder.deleted ? (folder.deletedAt ?? folder.updatedAt) : null);
+    }
+  }
+
+  deleteFolder(folderId: string, deletedAt: number) {
+    requireNonEmptyString(folderId, 'folderId');
+    requireTimestamp(deletedAt, 'deletedAt');
+
+    this.doc.transact(() => {
+      const folder = this.folders.get(folderId);
+      if (!folder) return;
+      folder.set('deleted', true);
+      folder.set('deletedAt', deletedAt);
+      folder.set('updatedAt', deletedAt);
+    }, LOCAL_CRDT_ORIGIN);
+  }
+
+  getFolder(folderId: string): CrdtFolderProjection | undefined {
+    const folder = this.folders.get(folderId);
+    if (!folder) return undefined;
+    return this.projectFolders().find((candidate) => candidate.id === folderId);
   }
 
   updateNotebook(updates: { name?: string; updatedAt: number }) {
@@ -546,9 +642,73 @@ export class NotebookCrdt {
         createdAt: readNumber(this.metadata, 'createdAt'),
         updatedAt: readNumber(this.metadata, 'updatedAt'),
       },
+      folders: this.projectFolders(),
       notes: Array.from(this.notes.entries())
         .map(([id, note]) => this.projectNote(id, note))
         .sort((a, b) => compareUtf8(a.id, b.id)),
+    };
+  }
+
+  /**
+   * Folder parent pointers are independently merged CRDT scalars. Concurrent
+   * moves can therefore create a cycle even when both local moves were valid.
+   * Projection breaks each cycle at its UTF-8-smallest folder ID and roots
+   * missing, deleted, empty, or self parents. The Y.Doc remains untouched, so
+   * every replica derives the same safe tree without emitting repair traffic.
+   */
+  private projectFolders(): CrdtFolderProjection[] {
+    const projected = Array.from(this.folders.entries())
+      .map(([id, folder]) => this.projectFolder(id, folder))
+      .sort((left, right) => compareUtf8(left.id, right.id));
+    const active = new Map(projected
+      .filter((folder) => !folder.deleted)
+      .map((folder) => [folder.id, folder]));
+    const parents = new Map<string, string | null>();
+
+    for (const folder of projected) {
+      const parentId = folder.parentFolderId;
+      parents.set(folder.id, (
+        parentId
+        && parentId !== folder.id
+        && active.has(parentId)
+      ) ? parentId : null);
+    }
+
+    const visited = new Set<string>();
+    for (const folder of projected) {
+      if (folder.deleted || visited.has(folder.id)) continue;
+      const path: string[] = [];
+      const pathIndexes = new Map<string, number>();
+      let currentId: string | null = folder.id;
+      while (currentId && active.has(currentId) && !visited.has(currentId)) {
+        const cycleStart = pathIndexes.get(currentId);
+        if (cycleStart !== undefined) {
+          const cycle = path.slice(cycleStart).sort(compareUtf8);
+          parents.set(cycle[0], null);
+          break;
+        }
+        pathIndexes.set(currentId, path.length);
+        path.push(currentId);
+        currentId = parents.get(currentId) ?? null;
+      }
+      for (const id of path) visited.add(id);
+    }
+
+    return projected.map((folder) => ({
+      ...folder,
+      parentFolderId: parents.get(folder.id) ?? null,
+    }));
+  }
+
+  private projectFolder(id: string, folder: FolderMap): CrdtFolderProjection {
+    return {
+      id,
+      name: getText(folder, 'name')?.toString() ?? '',
+      parentFolderId: readNullableString(folder, 'parentFolderId'),
+      createdAt: readNumber(folder, 'createdAt'),
+      updatedAt: readNumber(folder, 'updatedAt'),
+      deleted: folder.get('deleted') === true,
+      deletedAt: readNullableNumber(folder, 'deletedAt'),
     };
   }
 

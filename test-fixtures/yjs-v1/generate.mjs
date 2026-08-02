@@ -48,6 +48,20 @@ const CONTRACT = {
           updatedAt: 'non-negative-safe-integer',
         },
       },
+      folders: {
+        name: 'folders',
+        type: 'Y.Map<folderId,Y.Map>',
+        identity: 'map-key',
+        optionalInLegacyDocuments: true,
+        fields: {
+          name: 'Y.Text',
+          parentFolderId: 'string|null',
+          createdAt: 'non-negative-safe-integer',
+          updatedAt: 'non-negative-safe-integer',
+          deleted: 'boolean',
+          deletedAt: 'non-negative-safe-integer|null',
+        },
+      },
       notes: {
         name: 'notes',
         type: 'Y.Map<noteId,Y.Map>',
@@ -111,6 +125,21 @@ const putNote = (notes, input) => {
   note.set('deletedAt', input.deletedAt ?? null);
 };
 
+const putFolder = (folders, input) => {
+  const folder = new Y.Map();
+  folders.set(input.id, folder);
+
+  const name = new Y.Text();
+  folder.set('name', name);
+  name.insert(0, input.name);
+
+  folder.set('parentFolderId', input.parentFolderId);
+  folder.set('createdAt', input.createdAt);
+  folder.set('updatedAt', input.updatedAt);
+  folder.set('deleted', input.deleted ?? false);
+  folder.set('deletedAt', input.deletedAt ?? null);
+};
+
 const readText = (note, key) => {
   const value = note.get(key);
   return value instanceof Y.Text ? value.toString() : '';
@@ -118,6 +147,7 @@ const readText = (note, key) => {
 
 const project = (doc) => {
   const metadata = doc.getMap(CONTRACT.crdt.roots.notebook.name);
+  const folders = doc.getMap(CONTRACT.crdt.roots.folders.name);
   const notes = doc.getMap(CONTRACT.crdt.roots.notes.name);
   return {
     schemaVersion: 1,
@@ -127,6 +157,17 @@ const project = (doc) => {
       createdAt: metadata.get('createdAt'),
       updatedAt: metadata.get('updatedAt'),
     },
+    folders: Array.from(folders.entries())
+      .map(([id, value]) => ({
+        id,
+        name: readText(value, 'name'),
+        parentFolderId: value.get('parentFolderId') ?? null,
+        createdAt: value.get('createdAt') ?? 0,
+        updatedAt: value.get('updatedAt') ?? 0,
+        deleted: value.get('deleted') === true,
+        deletedAt: value.get('deletedAt') ?? null,
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
     notes: Array.from(notes.entries())
       .map(([id, value]) => ({
         id,
@@ -173,6 +214,15 @@ base.transact(() => {
   metadata.set('createdAt', 1_725_000_000_000);
   metadata.set('updatedAt', 1_725_000_000_000);
 
+  const folders = base.getMap(CONTRACT.crdt.roots.folders.name);
+  putFolder(folders, {
+    id: 'folder-research',
+    name: 'Research',
+    parentFolderId: null,
+    createdAt: 1_725_000_000_005,
+    updatedAt: 1_725_000_000_005,
+  });
+
   const notes = base.getMap(CONTRACT.crdt.roots.notes.name);
   putNote(notes, {
     id: 'note-alpha',
@@ -204,11 +254,19 @@ base.transact(() => {
   const content = alpha.get('content');
   content.insert(0, 'Browser edit: ');
   alpha.set('updatedAt', INCREMENTAL_TIMESTAMP);
+  const folders = base.getMap(CONTRACT.crdt.roots.folders.name);
+  putFolder(folders, {
+    id: 'folder-offline',
+    name: 'Offline',
+    parentFolderId: 'folder-research',
+    createdAt: INCREMENTAL_TIMESTAMP,
+    updatedAt: INCREMENTAL_TIMESTAMP,
+  });
   putNote(notes, {
     id: 'note-gamma',
     title: 'Offline checklist',
     content: '- [x] Create state vector\n- [ ] Apply delta\n',
-    folderId: 'folder-research',
+    folderId: 'folder-offline',
     createdAt: INCREMENTAL_TIMESTAMP,
     updatedAt: INCREMENTAL_TIMESTAMP,
   });
@@ -230,6 +288,10 @@ base.transact(() => {
   beta.set('deleted', true);
   beta.set('deletedAt', TOMBSTONE_TIMESTAMP);
   beta.set('updatedAt', TOMBSTONE_TIMESTAMP);
+  const offline = base.getMap(CONTRACT.crdt.roots.folders.name).get('folder-offline');
+  offline.set('deleted', true);
+  offline.set('deletedAt', TOMBSTONE_TIMESTAMP);
+  offline.set('updatedAt', TOMBSTONE_TIMESTAMP);
 }, 'fixture:tombstone');
 const tombstoneUpdate = Y.encodeStateAsUpdate(base, beforeTombstoneStateVector);
 const afterTombstoneStateVector = Y.encodeStateVector(base);

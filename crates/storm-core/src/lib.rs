@@ -3,6 +3,8 @@
 //! The names and value types in this module are a wire contract with the web
 //! client. Changing them requires new cross-language fixtures.
 
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use yrs::{
@@ -14,6 +16,7 @@ use yrs::{
 pub const NOTEBOOK_CRDT_SCHEMA_VERSION: u32 = 1;
 pub const NOTEBOOK_MAP_NAME: &str = "notebook";
 pub const NOTES_MAP_NAME: &str = "notes";
+pub const FOLDERS_MAP_NAME: &str = "folders";
 
 #[derive(Debug, Error)]
 pub enum CoreError {
@@ -57,9 +60,25 @@ pub struct Note {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Folder {
+    pub id: String,
+    pub name: String,
+    pub parent_folder_id: Option<String>,
+    pub created_at: u64,
+    pub updated_at: u64,
+    #[serde(default)]
+    pub deleted: bool,
+    #[serde(default)]
+    pub deleted_at: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NotebookSnapshot {
     pub schema_version: u32,
     pub notebook: NotebookSeed,
+    #[serde(default)]
+    pub folders: Vec<Folder>,
     pub notes: Vec<Note>,
 }
 
@@ -209,6 +228,7 @@ pub struct NotebookCrdt {
     doc: Doc,
     notebook_id: String,
     metadata: MapRef,
+    folders: MapRef,
     notes: MapRef,
 }
 
@@ -231,11 +251,13 @@ impl NotebookCrdt {
         };
         let doc = Doc::with_options(options);
         let metadata = doc.get_or_insert_map(NOTEBOOK_MAP_NAME);
+        let folders = doc.get_or_insert_map(FOLDERS_MAP_NAME);
         let notes = doc.get_or_insert_map(NOTES_MAP_NAME);
         Ok(Self {
             doc,
             notebook_id,
             metadata,
+            folders,
             notes,
         })
     }
@@ -251,6 +273,15 @@ impl NotebookCrdt {
     }
 
     pub fn seed(&self, notebook: &NotebookSeed, notes: &[Note]) -> Result<(), CoreError> {
+        self.seed_with_folders(notebook, &[], notes)
+    }
+
+    pub fn seed_with_folders(
+        &self,
+        notebook: &NotebookSeed,
+        folders: &[Folder],
+        notes: &[Note],
+    ) -> Result<(), CoreError> {
         if notebook.id != self.notebook_id {
             return Err(CoreError::NotebookMismatch {
                 expected: self.notebook_id.clone(),
@@ -276,8 +307,76 @@ impl NotebookCrdt {
         }
         self.metadata
             .insert(&mut txn, "updatedAt", number(notebook.updated_at));
+        for folder in folders {
+            self.upsert_folder_in_txn(&mut txn, folder, true)?;
+        }
         for note in notes {
             self.upsert_note_in_txn(&mut txn, note, true)?;
+        }
+        Ok(())
+    }
+
+    pub fn upsert_folder(&self, folder: &Folder) -> Result<(), CoreError> {
+        let mut txn = self.doc.transact_mut();
+        self.upsert_folder_in_txn(&mut txn, folder, false)
+    }
+
+    fn upsert_folder_in_txn(
+        &self,
+        txn: &mut yrs::TransactionMut<'_>,
+        folder: &Folder,
+        seed_mode: bool,
+    ) -> Result<(), CoreError> {
+        require_text(&folder.id, "folder.id")?;
+        require_text(&folder.name, "folder.name")?;
+        if let Some(parent_folder_id) = &folder.parent_folder_id {
+            require_text(parent_folder_id, "folder.parent_folder_id")?;
+        }
+        require_timestamp(folder.created_at, "folder.created_at")?;
+        require_timestamp(folder.updated_at, "folder.updated_at")?;
+        if let Some(deleted_at) = folder.deleted_at {
+            require_timestamp(deleted_at, "folder.deleted_at")?;
+        }
+
+        let existing = as_map(self.folders.get(txn, &folder.id));
+        let is_new = existing.is_none();
+        let folder_map = existing.unwrap_or_else(|| {
+            self.folders
+                .insert(txn, folder.id.clone(), MapPrelim::default())
+        });
+        let name = get_or_insert_text(txn, &folder_map, "name");
+        replace_text(txn, &name, &folder.name);
+        match &folder.parent_folder_id {
+            Some(parent_folder_id) => {
+                folder_map.insert(txn, "parentFolderId", parent_folder_id.clone());
+            }
+            None => {
+                folder_map.insert(txn, "parentFolderId", Any::Null);
+            }
+        }
+        if is_new || folder_map.get(txn, "createdAt").is_none() {
+            folder_map.insert(txn, "createdAt", number(folder.created_at));
+        }
+        folder_map.insert(txn, "updatedAt", number(folder.updated_at));
+
+        if is_new || !seed_mode || folder.deleted {
+            folder_map.insert(txn, "deleted", folder.deleted);
+            match folder.deleted_at {
+                Some(value) => folder_map.insert(txn, "deletedAt", number(value)),
+                None => folder_map.insert(txn, "deletedAt", Any::Null),
+            };
+        }
+        Ok(())
+    }
+
+    pub fn delete_folder(&self, folder_id: &str, deleted_at: u64) -> Result<(), CoreError> {
+        require_text(folder_id, "folder_id")?;
+        require_timestamp(deleted_at, "deleted_at")?;
+        let mut txn = self.doc.transact_mut();
+        if let Some(folder) = as_map(self.folders.get(&txn, folder_id)) {
+            folder.insert(&mut txn, "deleted", true);
+            folder.insert(&mut txn, "deletedAt", number(deleted_at));
+            folder.insert(&mut txn, "updatedAt", number(deleted_at));
         }
         Ok(())
     }
@@ -377,6 +476,67 @@ impl NotebookCrdt {
             created_at: out_number(self.metadata.get(&txn, "createdAt")).unwrap_or_default(),
             updated_at: out_number(self.metadata.get(&txn, "updatedAt")).unwrap_or_default(),
         };
+        let mut folders = Vec::new();
+        for (id, value) in self.folders.iter(&txn) {
+            let Some(folder) = value.cast::<MapRef>().ok() else {
+                continue;
+            };
+            folders.push(Folder {
+                id: id.to_string(),
+                name: as_text(folder.get(&txn, "name"))
+                    .map(|text| text.get_string(&txn))
+                    .unwrap_or_default(),
+                parent_folder_id: out_optional_string(folder.get(&txn, "parentFolderId")),
+                created_at: out_number(folder.get(&txn, "createdAt")).unwrap_or_default(),
+                updated_at: out_number(folder.get(&txn, "updatedAt")).unwrap_or_default(),
+                deleted: out_bool(folder.get(&txn, "deleted")).unwrap_or(false),
+                deleted_at: out_optional_number(folder.get(&txn, "deletedAt")),
+            });
+        }
+        folders.sort_by(|left, right| left.id.cmp(&right.id));
+        let active: BTreeSet<String> = folders
+            .iter()
+            .filter(|folder| !folder.deleted)
+            .map(|folder| folder.id.clone())
+            .collect();
+        let mut parents: BTreeMap<String, Option<String>> = folders
+            .iter()
+            .map(|folder| {
+                let parent = folder
+                    .parent_folder_id
+                    .as_ref()
+                    .filter(|parent| *parent != &folder.id && active.contains(*parent))
+                    .cloned();
+                (folder.id.clone(), parent)
+            })
+            .collect();
+        let mut visited = BTreeSet::new();
+        for folder in &folders {
+            if folder.deleted || visited.contains(&folder.id) {
+                continue;
+            }
+            let mut path = Vec::<String>::new();
+            let mut indexes = HashMap::<String, usize>::new();
+            let mut current = Some(folder.id.clone());
+            while let Some(id) = current {
+                if !active.contains(&id) || visited.contains(&id) {
+                    break;
+                }
+                if let Some(cycle_start) = indexes.get(&id).copied() {
+                    if let Some(root) = path[cycle_start..].iter().min().cloned() {
+                        parents.insert(root, None);
+                    }
+                    break;
+                }
+                indexes.insert(id.clone(), path.len());
+                path.push(id.clone());
+                current = parents.get(&id).cloned().flatten();
+            }
+            visited.extend(path);
+        }
+        for folder in &mut folders {
+            folder.parent_folder_id = parents.remove(&folder.id).flatten();
+        }
         let mut notes = Vec::new();
         for (id, value) in self.notes.iter(&txn) {
             let Some(note) = value.cast::<MapRef>().ok() else {
@@ -401,6 +561,7 @@ impl NotebookCrdt {
         Ok(NotebookSnapshot {
             schema_version: NOTEBOOK_CRDT_SCHEMA_VERSION,
             notebook,
+            folders,
             notes,
         })
     }
@@ -470,6 +631,55 @@ impl NotebookCrdt {
         }
         required_timestamp(self.metadata.get(&txn, "createdAt"), "notebook.createdAt")?;
         required_timestamp(self.metadata.get(&txn, "updatedAt"), "notebook.updatedAt")?;
+
+        for (id, value) in self.folders.iter(&txn) {
+            if id.trim().is_empty() {
+                return Err(CoreError::InvalidDocument(
+                    "folder map contains an empty ID".to_owned(),
+                ));
+            }
+            let folder = value.cast::<MapRef>().map_err(|_| {
+                CoreError::InvalidDocument(format!("folders.{id} must be a Y.Map"))
+            })?;
+            let name = as_text(folder.get(&txn, "name")).ok_or_else(|| {
+                CoreError::InvalidDocument(format!("folders.{id}.name must be a Y.Text"))
+            })?;
+            if name.get_string(&txn).trim().is_empty() {
+                return Err(CoreError::InvalidDocument(format!(
+                    "folders.{id}.name must not be empty"
+                )));
+            }
+            match folder.get(&txn, "parentFolderId") {
+                Some(Out::Any(Any::String(_))) | Some(Out::Any(Any::Null)) => {}
+                _ => {
+                    return Err(CoreError::InvalidDocument(format!(
+                        "folders.{id}.parentFolderId must be a string or null"
+                    )))
+                }
+            }
+            required_timestamp(
+                folder.get(&txn, "createdAt"),
+                &format!("folders.{id}.createdAt"),
+            )?;
+            required_timestamp(
+                folder.get(&txn, "updatedAt"),
+                &format!("folders.{id}.updatedAt"),
+            )?;
+            match folder.get(&txn, "deleted") {
+                None | Some(Out::Any(Any::Bool(_))) => {}
+                _ => {
+                    return Err(CoreError::InvalidDocument(format!(
+                        "folders.{id}.deleted must be a boolean when present"
+                    )))
+                }
+            }
+            match folder.get(&txn, "deletedAt") {
+                None | Some(Out::Any(Any::Null)) => {}
+                value => {
+                    required_timestamp(value, &format!("folders.{id}.deletedAt"))?;
+                }
+            }
+        }
 
         for (id, value) in self.notes.iter(&txn) {
             if id.trim().is_empty() {
@@ -548,6 +758,18 @@ mod tests {
         }
     }
 
+    fn folder(id: &str, name: &str, parent_folder_id: Option<&str>) -> Folder {
+        Folder {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            parent_folder_id: parent_folder_id.map(str::to_owned),
+            created_at: 1,
+            updated_at: 2,
+            deleted: false,
+            deleted_at: None,
+        }
+    }
+
     #[test]
     fn utf16_diff_never_splits_an_emoji() {
         assert_eq!(
@@ -563,13 +785,78 @@ mod tests {
     #[test]
     fn v1_update_and_state_vector_converge() -> Result<(), CoreError> {
         let left = NotebookCrdt::new("notebook-1")?;
-        left.seed(&seed("notebook-1"), &[note("note-1", "base")])?;
+        left.seed_with_folders(
+            &seed("notebook-1"),
+            &[folder("folder-1", "Plans", None)],
+            &[note("note-1", "base")],
+        )?;
         let right = NotebookCrdt::from_update("notebook-1", &left.encode_state_as_update_v1())?;
 
         left.upsert_note(&note("note-1", "left edit"))?;
+        right.upsert_folder(&folder("folder-2", "Archive", Some("folder-1")))?;
         let right_vector = right.encode_state_vector_v1();
         right.apply_update_v1(&left.encode_diff_v1(&right_vector)?)?;
+        let left_vector = left.encode_state_vector_v1();
+        left.apply_update_v1(&right.encode_diff_v1(&left_vector)?)?;
         assert_eq!(left.snapshot()?, right.snapshot()?);
+        Ok(())
+    }
+
+    #[test]
+    fn folder_tombstone_survives_local_seed() -> Result<(), CoreError> {
+        let replica = NotebookCrdt::new("notebook-1")?;
+        let original = folder("folder-1", "Plans", None);
+        replica.seed_with_folders(&seed("notebook-1"), &[original.clone()], &[])?;
+        replica.delete_folder("folder-1", 20)?;
+        replica.seed_with_folders(
+            &seed("notebook-1"),
+            &[Folder {
+                name: "Stale plans".to_owned(),
+                updated_at: 30,
+                ..original
+            }],
+            &[],
+        )?;
+
+        let projected = &replica.snapshot()?.folders[0];
+        assert!(projected.deleted);
+        assert_eq!(projected.deleted_at, Some(20));
+        assert_eq!(projected.name, "Stale plans");
+        Ok(())
+    }
+
+    #[test]
+    fn folder_projection_normalizes_invalid_parents_and_cycles_like_the_browser(
+    ) -> Result<(), CoreError> {
+        let replica = NotebookCrdt::new("notebook-1")?;
+        let mut deleted = folder("deleted", "Deleted", None);
+        deleted.deleted = true;
+        deleted.deleted_at = Some(3);
+        replica.seed_with_folders(
+            &seed("notebook-1"),
+            &[
+                folder("missing-child", "Missing", Some("absent")),
+                folder("self", "Self", Some("self")),
+                deleted,
+                folder("deleted-child", "Deleted child", Some("deleted")),
+                folder("é", "Unicode", Some("z")),
+                folder("z", "ASCII", Some("é")),
+            ],
+            &[],
+        )?;
+
+        let projected: BTreeMap<String, Option<String>> = replica
+            .snapshot()?
+            .folders
+            .into_iter()
+            .map(|folder| (folder.id, folder.parent_folder_id))
+            .collect();
+        assert_eq!(projected["missing-child"], None);
+        assert_eq!(projected["self"], None);
+        assert_eq!(projected["deleted-child"], None);
+        // UTF-8 byte order puts ASCII `z` before the leading byte of `é`.
+        assert_eq!(projected["z"], None);
+        assert_eq!(projected["é"].as_deref(), Some("z"));
         Ok(())
     }
 

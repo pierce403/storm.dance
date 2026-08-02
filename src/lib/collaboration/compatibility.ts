@@ -27,6 +27,7 @@ export const NOTEBOOK_CRDT_UPDATE_ENCODING = 'yjs-v1';
 export const NOTEBOOK_CRDT_STATE_VECTOR_ENCODING = 'yjs-v1';
 export const NOTEBOOK_CRDT_GUID_PREFIX = 'stormdance:notebook:';
 export const NOTEBOOK_CRDT_METADATA_MAP = 'notebook';
+export const NOTEBOOK_CRDT_FOLDERS_MAP = 'folders';
 export const NOTEBOOK_CRDT_NOTES_MAP = 'notes';
 
 /**
@@ -76,6 +77,20 @@ export const STORMDANCE_COMPATIBILITY_CONTRACT = {
           name: 'string',
           createdAt: 'non-negative-safe-integer',
           updatedAt: 'non-negative-safe-integer',
+        },
+      },
+      folders: {
+        name: NOTEBOOK_CRDT_FOLDERS_MAP,
+        type: 'Y.Map<folderId,Y.Map>',
+        identity: 'map-key',
+        optionalInLegacyDocuments: true,
+        fields: {
+          name: 'Y.Text',
+          parentFolderId: 'string|null',
+          createdAt: 'non-negative-safe-integer',
+          updatedAt: 'non-negative-safe-integer',
+          deleted: 'boolean',
+          deletedAt: 'non-negative-safe-integer|null',
         },
       },
       notes: {

@@ -62,11 +62,18 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - Users can rename folders inline.
   - Deleting a folder reparents child notes and folders to the deleted folder's parent.
   - Drag-and-drop can move notes and folders without creating folder cycles.
+  - Collaborative folders are first-class CRDT entities with stable IDs, mergeable names, parent-folder pointers, timestamps, and deletion tombstones; empty folders therefore synchronize without needing a placeholder note.
+  - Folder create, rename, move, and delete operations and note drag-and-drop folder changes travel through the same persisted Yjs/XMTP session as note edits. Hosted web and Tauri webview replicas persist incoming folder projections into their local notebook database and UI.
+  - Concurrent parent changes are projected as a deterministic safe tree: missing, deleted, self, or empty parents become roots, and a cycle is broken at the UTF-8-smallest folder ID on every replica.
+  - Notes that reference a missing or tombstoned folder remain visible at the notebook root as a defensive compatibility fallback.
   - Folder paths are preserved during backup export/import.
 - **Test Criteria**:
-  - [x] Playwright creates and toggles a root folder.
+  - [x] Playwright creates a root folder, drags a note into it, reloads, and verifies the nested note remains in that folder.
+  - [x] Vitest synchronizes empty/nested folder entities, rename, note moves, tombstones, and deterministic parent normalization between Yjs replicas and simulated collaboration sessions.
   - [ ] Folder deletion reparents child content.
   - [ ] Drag-and-drop move behavior rejects self or descendant folder drops.
+  - [x] The live XMTP dev-network matrix creates a web folder, moves a note into it, verifies the Tauri projection and CLI nested Markdown, then publishes a CLI-created empty root directory to web/Tauri and verifies both folder entities during late-contributor catch-up.
+  - [ ] Live XMTP coverage still needs nested empty-folder creation, folder rename/parent move, directory rename/move, and folder deletion/reparenting in both directions.
 
 ### Backup, Import, and Export
 - **Stability**: stable
@@ -132,7 +139,7 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - One XMTP MLS group in one XMTP environment represents a collaborative notebook; cross-environment rebinding is rejected and the real conversation ID is persisted locally.
   - Group descriptions bind a conversation to a URI-encoded notebook ID; unrelated groups are ignored.
   - New groups use XMTP admin-only permissions and membership is added by Ethereum identifier.
-  - One Yjs document owns notebook metadata, stable note IDs, `Y.Text` title/content, timestamps, folder IDs, and deletion tombstones.
+  - One Yjs document owns notebook metadata, stable note IDs, `Y.Text` note title/content, note folder references, and first-class folder entities. Each folder has a stable ID, `Y.Text` name, parent reference, timestamps, and deletion tombstone in the additive `folders` root.
   - Local Yjs updates are merged into a 250 ms batch before XMTP transmission.
   - Strict, versioned protocol messages support manifests, snapshots, incremental updates, and state-vector requests.
   - Binary updates are size-bounded, chunked, duplicate-tolerant, and safely reassembled out of order.
@@ -141,17 +148,19 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - Environment-keyed Yjs state is authoritative on reconnect; remote projections persist to IndexedDB, update open UI state, and preserve tombstones.
   - Same-inbox devices distinguish their own messages by protocol message ID instead of dropping all messages from the inbox.
   - Selecting a linked notebook resumes collaboration, while explicit stop and disconnect cleanly end streams.
-  - Folder IDs travel with notes, but folder entities/names are not yet synchronized between browser replicas; notes for unknown folders remain visible at the notebook root.
+  - Folder creation, rename, parent moves, deletion, and note-to-folder moves are persisted and broadcast as ordinary CRDT deltas, so browser and Tauri webview replicas converge on the same tree without application-level metadata messages.
+  - Legacy schema-v1 Yjs state without the additive `folders` root remains readable; the local folder rows are recovered safely without allowing stale seed data to resurrect a shared tombstone.
   - Stopping collaboration tears down active streams and clears session state.
 - **Test Criteria**:
   - [x] Vitest covers ENS/address resolution.
   - [x] Vitest covers native collaborator refresh, reachability, duplicate detection, add/remove by inbox, role promotion/demotion, serialized mutations, self-protection, and final-super-admin protection.
   - [x] Component tests cover role-based collaborator controls and identity display without a live XMTP network.
   - [x] Vitest covers concurrent Yjs edits, offline state-vector repair, duplicate/out-of-order updates, and deletion tombstones.
+  - [x] Vitest covers first-class folder creation, nesting, rename, note moves, tombstones, legacy-state recovery, and deterministic cycle normalization.
   - [x] Vitest covers group creation, 250 ms batching, history/live delivery, same-inbox installations, and stream cleanup.
   - [x] A deterministic two-client transport test proves both replicas converge after concurrent edits.
   - [ ] Browser tests cover invite acceptance/rejection without live XMTP network calls.
-  - [x] CI on relevant `main` changes exercises shared web/Tauri sessions, the directory CLI, and a dynamically added collaborator through four independent XMTP dev-network identities, installations, and databases, including native role promotion/demotion and removal.
+  - [x] CI on relevant `main` changes exercises shared web/Tauri sessions, the directory CLI, and a dynamically added collaborator through four independent XMTP dev-network identities, installations, and databases. It includes web-folder/note-move projection into Tauri and CLI Markdown, CLI empty-directory projection into web/Tauri, late-contributor folder catch-up, and native role promotion/demotion/removal.
 
 ### Command-Line Markdown Sync
 - **Stability**: in-progress
@@ -164,15 +173,18 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - `link` persists strict schema-2 `.stormdance/config.json` metadata, including the expected XMTP inbox ID, and performs the initial sync.
   - `sync` performs a finite catch-up; `sync --watch` keeps the group and directory live until interrupted.
   - `.stormdance/state.bin` persists the local Yjs replica so catch-up does not depend on indefinite XMTP history.
-  - Live notes materialize as nested, collision-safe `.md` files with stable identity/timestamp metadata; existing paths stay stable when a title changes.
+  - Live notes and first-class folder entities materialize as an Obsidian-compatible tree of collision-safe directories and `.md` files; nested and empty remote folders exist on disk without placeholder notes, and existing note paths stay stable when only a title changes.
   - Metadata-free Markdown is adopted in place once, including inside nested Obsidian folders, rather than repeatedly imported as duplicate notes.
-  - External edits, new Markdown files, renames, and owned-file deletion tombstones flow back into Yjs and XMTP.
-  - Writes are atomic per file, unchanged files are not rewritten, unsafe paths and symlinks are rejected, unowned files are never deleted, and manifest hashes preserve unsynced replacements of owned paths.
+  - External edits, new Markdown files, note moves, directory create/rename/move/delete operations, and owned-file deletion tombstones flow back into Yjs and XMTP. The actual parent directory determines a moved note's folder instead of stale embedded metadata.
+  - `.stormdance/manifest.json` records folder ID-to-path ownership hints. It preserves stable IDs through unambiguous directory moves and renames; new directories receive deterministic, notebook-scoped `obsidian:path:<encoded-notebook-id>:<encoded-relative-path>` IDs so identical vault paths in different notebooks cannot collide.
+  - Writes are atomic per file, unchanged files are not rewritten, unsafe paths and symlinks are rejected, and unowned files are never overwritten or deleted. Retired folder paths are removed only when they are real empty directories, so attachments and other Obsidian data prevent deletion.
   - The ordinary Markdown vault can be consumed by local full-text search, embedding pipelines, and vector databases without a storm.dance-specific reader.
 - **Test Criteria**:
-  - [x] Vitest covers schema-1 migration, schema-2 metadata, nested Obsidian adoption, incremental materialization, rename/move, deletion, UTF-8, collision, and symlink safety.
-  - [x] Vitest covers group discovery, strict link configuration, history replay, Yjs persistence, delta requests, 250 ms batching, and file deletion tombstones.
-  - [ ] A live dev-network smoke test links a CLI profile invited from the browser and observes edits in both directions.
+  - [x] Vitest covers schema-1 migration, schema-2 metadata, nested Obsidian adoption, empty/nested folder materialization, stable folder identity across rename/move, note moves between folders, deletion, UTF-8, collision, unowned-content preservation, and symlink safety.
+  - [x] Vitest covers group discovery, strict link configuration, history replay, Yjs persistence, delta requests, 250 ms batching, remote folder-tree materialization, and publishing an empty filesystem directory as shared CRDT state.
+  - [x] A live dev-network smoke test links a CLI profile invited from the browser and observes note edits in both directions.
+  - [x] The live dev-network smoke materializes a web-created folder and moved note as nested CLI Markdown, then publishes an ordinary CLI-created empty root directory into the web/Tauri folder tree and a later contributor's catch-up state.
+  - [ ] Live CLI coverage still needs empty nested directories, directory rename/move/delete, and filesystem note moves back into browser replicas.
 
 ### Filesystem-First Agent and Obsidian Workspaces
 - **Stability**: in-progress
@@ -185,9 +197,11 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - Watcher feedback suppression uses persisted content hashes rather than event timing because filesystem events can be duplicated, coalesced, delayed, or reordered.
   - A stable note ID, not its filename or title, is the note's identity. A `.stormdance` manifest maps relative paths to note IDs and synchronized hashes; an unobtrusive leading HTML comment makes identity recoverable after moves or copies.
   - The manifest remains authoritative for an already managed path if an editor or agent accidentally removes the embedded metadata comment.
-  - Notebook folders project to real directories instead of a flat mirror. Paths are normalized and collision-safe without changing stable note IDs.
+  - Notebook folders are shared CRDT entities that project to real directories instead of a flat mirror. Empty and nested directories round-trip between browser/Tauri folder trees and Node/Rust vaults; paths are normalized and collision-safe without changing stable folder or note IDs.
+  - The manifest maps folder IDs to paths so unambiguous filesystem directory rename/move operations keep their CRDT identity. A new directory receives a deterministic path-derived ID, and a note moved with ordinary filesystem tools adopts its actual parent directory.
   - The linked directory can be opened directly as an Obsidian vault. storm.dance does not require a proprietary Markdown parser or a custom Obsidian plugin for ordinary editing and synchronization.
   - `.obsidian/`, `.trash/`, and other editor configuration directories are treated as local, unowned data unless a future explicit settings-sync feature is enabled; storm.dance never deletes or interprets them as notes.
+  - Folder ownership is deliberately conservative: a manifest path is not permission for recursive removal. A remote folder tombstone or move can retire only a real empty directory, and symlinks, attachments, unowned Markdown, and other user content are never followed or deleted.
   - Standard Markdown and Obsidian syntax is preserved losslessly when storm.dance does not need to interpret it, including YAML frontmatter, `[[wikilinks]]`, `![[embeds]]`, tags, task lists, callouts, block references, footnotes, and fenced code blocks.
   - Note metadata does not commandeer user YAML frontmatter. The default identity marker remains an HTML comment, with any future frontmatter integration confined to a namespaced `stormdance` key.
   - Obsidian-style internal links and relative Markdown links remain readable. File renames must not silently rewrite unrelated prose, and any automatic link rewriting must be explicit, scoped, and tested.
@@ -208,7 +222,9 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - [ ] `.obsidian/`, attachments, symlinks, unsafe paths, and unowned files are never rewritten or deleted by note synchronization.
   - [ ] Profile mismatch reports the expected and actual inbox IDs without exposing private key material.
   - [ ] Obsidian and an ordinary coding agent can edit the same watched vault while a browser collaborator observes convergent changes.
-  - [x] Rust tests cover nested Markdown adoption, stable identity, atomic materialization, watcher feedback suppression, fenced metadata, Windows reserved names, dirty tombstone conflict preservation, and parent-symlink rejection.
+  - [x] Node tests cover browser-to-vault empty/nested folder materialization, vault-to-browser empty directory creation, directory rename/move identity, note moves between folders, tombstones, unowned content, and symlink safety through the shared directory sync path.
+  - [x] Rust tests cover nested Markdown adoption, empty/nested folder scans and materialization, folder rename and note move distinction, stable identity, atomic materialization, watcher feedback suppression, fenced metadata, Windows reserved names, dirty tombstone conflict preservation, and parent-symlink rejection.
+  - [x] The live XMTP smoke proves web-to-CLI folder/note materialization and CLI-to-web/Tauri empty-root-directory projection; the rename/move/delete directions remain release gates.
 
 ### Native Rust Core, CLI, and Sync Daemon
 - **Stability**: in-progress
@@ -217,6 +233,8 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - A reusable `storm-core` owns notebook operations without depending on Tauri, React, command-line parsing, or a particular presentation layer.
   - Native transport is isolated behind `XmtpTransport`, with the reviewed upstream `libxmtp` revision recorded as a compatibility pin. Upstream's Rust crates are not published as a stable SDK, so the default binary does not claim a direct live libxmtp driver yet.
   - Yrs applies the same Yjs-compatible update encoding and state-vector protocol used by the browser; Rust does not introduce a second notebook data model.
+  - The native Yrs document exposes the same additive `folders` root and projects folder name, parent, timestamps, and tombstone fields. Rust vault scans create/update/tombstone those entities from real directories, while materialization creates empty/nested directories and relocates owned notes when their folder changes.
+  - Native directory retirement follows the same conservative boundary as the Node mirror: never traverse a symlink or recursively delete a path, and remove only empty real directories after preserving unowned content.
   - The native implementation preserves the existing versioned storm.dance envelope, validation bounds, chunking, duplicate tolerance, tombstones, and catch-up behavior.
   - The packaged native CLI is intentionally local-only today: `sync` and `watch` reconcile Markdown/Yrs state and explicitly report `networkSynchronized: false`. The packaged Node CLI remains the supported live XMTP CLI.
   - Target: one process owns a profile's encrypted XMTP database at a time; short-lived commands use daemon IPC or an exclusive profile lock.
@@ -226,9 +244,10 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - Target: expose an optional MCP server for typed discovery, reading, search, status, and change subscriptions while keeping files as the authoring interface.
 - **Test Criteria**:
   - [ ] Rust can register or recover an XMTP identity, report its inbox/installation IDs, enumerate storm.dance groups, and stream messages on the dev network.
-  - [x] Committed fixtures prove Yjs-created full state, incremental updates, state vectors, tombstones, concurrent edits, and all wire message kinds are accepted by Yrs/Rust.
+  - [x] Committed fixtures prove Yjs-created full state, nested folder entities, note/folder tombstones, incremental updates, state vectors, concurrent edits, and all wire message kinds are accepted by Yrs/Rust.
   - [x] The Rust protocol engine has deterministic in-memory transport tests for snapshots and concurrent incremental updates; strict wire fixtures cover duplicate and out-of-order chunks.
   - [x] A separately labeled Yrs-produced full-state and incremental fixture is consumed directly by Yjs to prove the reverse producer direction.
+  - [x] Rust tests cover folder CRDT convergence/tombstones and bidirectional empty/nested directory, folder rename/move, and owned-note relocation behavior.
   - [ ] The direct libxmtp driver passes dev-network identity, group, stream, and same-inbox installation tests.
   - [ ] Profile locking prevents concurrent database ownership by the daemon, standalone CLI, or desktop process.
   - [ ] A migration test opens a copied Node-created profile, verifies the same inbox and groups, and leaves the source profile untouched.
@@ -242,6 +261,7 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - Browser clients use Yjs, IndexedDB, and the supported XMTP browser SDK. The first desktop milestone deliberately reuses that proven XMTP session inside the Tauri webview while a typed Yjs-v1 IPC bridge connects it to the native Yrs vault; direct native libxmtp remains the next transport-adapter milestone.
   - Hosted web, Tauri's shared webview session, and the Node directory CLI are ordinary XMTP installations that can participate in the same notebook group without routing through one another. A direct native daemon installation remains planned.
   - Tauri reuses the complete React interface and adds typed commands/events for runtime status, directory selection, watch lifecycle, full-state materialization, and native CRDT updates. Native vault updates enter the ordinary XMTP batcher; remote/browser state is merged back into every matching watched vault.
+  - The bridge carries the complete Yjs-v1 state, including first-class folders, so webview folder create/rename/move/delete and note drag operations materialize through Rust as real directories, while external empty/nested directory changes project back into the React folder tree and XMTP session.
   - The editor remains locally responsive: React applies edits immediately and IndexedDB is always persisted before XMTP broadcast; when a matching vault is watched, the Rust core also persists and materializes the merged state before that broadcast.
   - The current desktop shell includes native vault access, background filesystem watching, conflict-safe materialization, runtime status, and a system tray. OS-keyring credentials, native encrypted XMTP SQLite ownership, notifications, and native FTS remain planned.
   - Target: the desktop process and daemon share one profile-ownership/IPC design rather than running competing XMTP clients against the same database.
@@ -254,6 +274,7 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - [ ] Desktop vault edits made through React, Obsidian, and external agents converge without running duplicate local replicas.
   - [ ] Packaging tests verify credential permissions, profile locking, auto-update integrity, and clean uninstall behavior without deleting user vaults.
   - [x] Unit tests cover hosted-web native no-ops, local-native update capture, desktop-session projection/persistence/XMTP broadcast, and Rust vault reconciliation.
+  - [x] The live XMTP smoke verifies that the shared Tauri webview session receives a web-created folder/note move and a CLI-created empty root folder, including late-contributor catch-up.
   - [x] CI defines unsigned development package builds for Windows x86_64, macOS arm64/x86_64, and Linux x86_64 plus CLI archives.
 
 ### IPFS Status and Decentralized Storage

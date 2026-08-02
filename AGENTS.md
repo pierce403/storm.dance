@@ -51,7 +51,7 @@ When working on this project, update this file whenever you learn something dura
     - `build.yml`: Runs on PRs and pushes to main. Verifies the web/CLI build, unit and Playwright suites, native core, and distributable Node CLI.
     - `deploy.yml`: Runs on pushes to `main`. Builds and deploys to GitHub Pages.
     - `desktop.yml`: Builds unsigned desktop bundles and CLI archives for supported targets.
-    - `interoperability.yml`: Runs the three-installation XMTP dev-network component smoke on relevant `main` changes.
+    - `interoperability.yml`: Runs the four-installation XMTP dev-network component smoke on relevant `main` changes.
 - **Deployment Process**:
     1. Code is pushed to `main`.
     2. `deploy.yml` triggers.
@@ -90,6 +90,8 @@ When working on this project, update this file whenever you learn something dura
     - Do not discard messages solely because `senderInboxId === client.inboxId`; another installation can share the inbox. Track message IDs emitted by this installation instead.
 - **CRDT**:
     - `NotebookCrdt` in `src/lib/collaboration/crdt.ts` is the merge source of truth. Do not reintroduce whole-note version counters or last-writer-wins replacement.
+    - Folders are first-class entities in the additive `folders` Y.Map/Yrs root. Preserve stable IDs, `Y.Text` names, parent pointers, timestamps, and deletion tombstones across browser, Node CLI, Rust, and Tauri projections. Legacy v1 documents without the optional root remain readable.
+    - Concurrent folder moves can produce cycles even when each local move was valid. Keep projection deterministic: root missing, deleted, self, and empty parents, and break a cycle at its UTF-8-smallest folder ID without emitting repair traffic.
     - Persist the encoded Yjs document in IndexedDB and use a two-way state-vector handshake to repair missing history.
     - Batch local Yjs updates for 250 ms before sending to stay well below XMTP write limits.
     - Seeding local IndexedDB rows must not force `deleted: false` onto an existing Yjs tombstone.
@@ -99,7 +101,10 @@ When working on this project, update this file whenever you learn something dura
     - CLI identities live in XDG profile directories as encrypted ethers keystores; imports are stdin-only and private material must never appear in flags, output, or attached errors.
     - Linked directories use shared mirror schema 2 under `.stormdance/`; config records the expected inbox ID, Markdown ownership is tracked by a manifest, and symlinks or unowned files must never be deleted.
     - Metadata-free Markdown must be adopted in place through `scanMirror(...).preferredPaths`; writing a second canonical copy causes repeat-import duplicates.
-    - The CLI and Rust/Tauri mirror both support nested Obsidian paths. Folder IDs round-trip in note metadata/manifest, but browser folder entities/names are not yet CRDT-synchronized. Browser notes whose folder is unknown locally must remain visible at the notebook root.
+    - The Node CLI and Rust/Tauri mirror project live folder entities to real nested directories, including empty directories, and scan ordinary directory creation, rename, move, and deletion back into CRDT folder updates. A note's actual filesystem parent overrides stale embedded `folderId` metadata when the note is moved.
+    - `.stormdance/manifest.json` folder paths preserve stable folder IDs across unambiguous directory renames/moves. New filesystem folders use deterministic, notebook-scoped `obsidian:path:<encoded-notebook-id>:<encoded-relative-path>` IDs; ambiguous identities must not be guessed and legacy manifest IDs must be preserved.
+    - Manifest folder paths are ownership hints, never permission for recursive deletion. Materializers may retire only real, empty directories; they must not follow symlinks or remove unowned notes, attachments, editor state, or other directory contents.
+    - Browser notes whose folder entity is missing or tombstoned must remain visible at the notebook root as a defensive compatibility fallback; do not discard their content.
     - Do not run the Node watcher and Tauri watcher against the same local vault concurrently until the cross-runtime vault lock lands.
     - The packaged Node CLI is the supported live XMTP headless client. The current Rust CLI is local-only and must report `networkSynchronized: false`; never describe its `sync` command as network synchronization until a real libxmtp driver is wired.
     - Tauri reuses the browser XMTP/Yjs session in its webview and bridges it to the Rust/Yrs vault. Direct native libxmtp remains behind the pinned `storm-xmtp` driver boundary.

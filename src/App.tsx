@@ -107,6 +107,7 @@ const getNotebookConversationId = (
   ?? normalizeConversationId(notebook?.xmtpEnv === env ? notebook?.xmtpTopic : undefined);
 
 const collaborationNoteKey = (notebookId: string, noteId: string) => `${notebookId}\u0000${noteId}`;
+const collaborationFolderKey = (notebookId: string, folderId: string) => `${notebookId}\u0000${folderId}`;
 
 // --- Import Password Modal --- 
 const ImportPasswordModal: React.FC<{ fileName: string; onImport: (password: string) => void; onCancel: () => void }> = ({ fileName, onImport, onCancel }) => {
@@ -186,6 +187,7 @@ function App() {
   const sidebarRef = useRef<SidebarHandle>(null);
   const notebooksListRef = useRef<HTMLUListElement>(null);
   const notesMutationVersionRef = useRef(0);
+  const foldersMutationVersionRef = useRef(0);
   const selectedNotebookIdRef = useRef(selectedNotebookId);
   const openNoteIdsRef = useRef(openNoteIds);
   const activeNoteIdRef = useRef(activeNoteId);
@@ -193,8 +195,11 @@ function App() {
   const notesRef = useRef(notes);
   const foldersRef = useRef(folders);
   const noteUpdateQueuesRef = useRef<Map<string, Promise<Note | undefined>>>(new Map());
+  const folderUpdateQueuesRef = useRef<Map<string, Promise<Folder | undefined>>>(new Map());
   const localNoteRevisionsRef = useRef<Map<string, number>>(new Map());
+  const localFolderRevisionsRef = useRef<Map<string, number>>(new Map());
   const tombstonedNoteIdsRef = useRef<Set<string>>(new Set());
+  const tombstonedFolderIdsRef = useRef<Set<string>>(new Set());
   const autoResumeKeyRef = useRef<string | null>(null);
   const xmtpClientRef = useRef<BrowserClient | null>(null);
   const isXmtpConnectingRef = useRef(false);
@@ -260,12 +265,25 @@ function App() {
   const handleRemoteProjection = useCallback(async (projection: NotebookCrdtProjection) => {
     const notebookId = projection.notebook.id;
     if (!notebooksRef.current.some((notebook) => notebook.id === notebookId)) return;
+    const projectedFolders = projection.folders ?? [];
+    const localFolderIdsAtProjectionStart = new Set(
+      foldersRef.current
+        .filter((folder) => folder.notebookId === notebookId)
+        .map((folder) => folder.id),
+    );
+    const projectedFolderIds = new Set(projectedFolders.map((folder) => folder.id));
     const localNoteIdsAtProjectionStart = new Set(
       notesRef.current
         .filter((note) => note.notebookId === notebookId)
         .map((note) => note.id),
     );
     const projectedNoteIds = new Set(projection.notes.map((note) => note.id));
+    const commitSelectedNotebookFolders = (nextFolders: Folder[]) => {
+      if (selectedNotebookIdRef.current !== notebookId) return;
+      const sorted = [...nextFolders].sort((left, right) => left.name.localeCompare(right.name));
+      foldersRef.current = sorted;
+      setFolders(sorted);
+    };
     const commitSelectedNotebookNotes = (nextNotes: Note[]) => {
       if (selectedNotebookIdRef.current !== notebookId) return;
       const sorted = [...nextNotes].sort((left, right) => right.updatedAt - left.updatedAt);
@@ -277,6 +295,14 @@ function App() {
         setActiveNoteIdAndStore(validOpen[0] || null);
       }
     };
+    const projectedLocalFolderRevisions = new Map(
+      projectedFolders.map((folder) => {
+        const key = collaborationFolderKey(notebookId, folder.id);
+        if (folder.deleted) tombstonedFolderIdsRef.current.add(key);
+        else tombstonedFolderIdsRef.current.delete(key);
+        return [folder.id, localFolderRevisionsRef.current.get(key) ?? 0] as const;
+      }),
+    );
     const projectedLocalRevisions = new Map(
       projection.notes.map((note) => {
         const key = collaborationNoteKey(notebookId, note.id);
@@ -287,6 +313,18 @@ function App() {
     );
     // Project into the controlled editor before any IndexedDB await. This
     // keeps the editor's next full-value change based on the current Yjs text.
+    // Folders are committed first so a note never flashes at the root merely
+    // because its folder row is still awaiting IndexedDB persistence.
+    commitSelectedNotebookFolders(projectedFolders
+      .filter((folder) => !folder.deleted)
+      .map((folder) => ({
+        id: folder.id,
+        notebookId,
+        name: folder.name,
+        parentFolderId: folder.parentFolderId,
+        createdAt: folder.createdAt,
+        updatedAt: folder.updatedAt,
+      })));
     commitSelectedNotebookNotes(projection.notes
       .filter((note) => !note.deleted)
       .map((note) => ({
@@ -309,6 +347,67 @@ function App() {
     };
     await dbService.createReplicaNotebook(projectedNotebook);
     handleCollaborativeNotebookUpdated(projectedNotebook);
+
+    const materializedFolders = new Map<string, Folder>();
+    for (const projected of projectedFolders) {
+      const key = collaborationFolderKey(notebookId, projected.id);
+      const projectedLocalRevision = projectedLocalFolderRevisions.get(projected.id) ?? 0;
+      const previousUpdate = folderUpdateQueuesRef.current.get(key) || Promise.resolve(undefined);
+      const queuedUpdate = previousUpdate
+        .catch(() => undefined)
+        .then(async (): Promise<Folder | undefined> => {
+          if (projected.deleted) {
+            await dbService.deleteExternalFolder(projected.id, notebookId);
+            return undefined;
+          }
+          if ((localFolderRevisionsRef.current.get(key) ?? 0) !== projectedLocalRevision) {
+            return foldersRef.current.find((folder) => (
+              folder.id === projected.id && folder.notebookId === notebookId
+            ));
+          }
+          const folder: Folder = {
+            id: projected.id,
+            notebookId,
+            name: projected.name,
+            parentFolderId: projected.parentFolderId,
+            createdAt: projected.createdAt,
+            updatedAt: projected.updatedAt,
+          };
+          await dbService.upsertExternalFolder(folder);
+          return folder;
+        });
+      folderUpdateQueuesRef.current.set(key, queuedUpdate);
+      const materialized = await queuedUpdate;
+      if (materialized) materializedFolders.set(projected.id, materialized);
+      if (folderUpdateQueuesRef.current.get(key) === queuedUpdate) {
+        folderUpdateQueuesRef.current.delete(key);
+      }
+    }
+
+    foldersMutationVersionRef.current += 1;
+    const currentFolders = foldersRef.current;
+    const projectedFoldersAfterPersistence = projectedFolders
+      .filter((projected) => !projected.deleted)
+      .map((projected) => {
+        const key = collaborationFolderKey(notebookId, projected.id);
+        const revisionChanged = (localFolderRevisionsRef.current.get(key) ?? 0)
+          !== (projectedLocalFolderRevisions.get(projected.id) ?? 0);
+        return revisionChanged
+          ? currentFolders.find((folder) => folder.id === projected.id && folder.notebookId === notebookId)
+          : materializedFolders.get(projected.id);
+      })
+      .filter((folder): folder is Folder => folder !== undefined);
+    const locallyCreatedFoldersDuringProjection = currentFolders.filter((folder) => {
+      if (folder.notebookId !== notebookId || projectedFolderIds.has(folder.id)) return false;
+      const key = collaborationFolderKey(notebookId, folder.id);
+      return !localFolderIdsAtProjectionStart.has(folder.id)
+        && (localFolderRevisionsRef.current.get(key) ?? 0) > 0
+        && !tombstonedFolderIdsRef.current.has(key);
+    });
+    commitSelectedNotebookFolders([
+      ...projectedFoldersAfterPersistence,
+      ...locallyCreatedFoldersDuringProjection,
+    ]);
 
     const materializedNotes = new Map<string, Note>();
     for (const projected of projection.notes) {
@@ -394,6 +493,8 @@ function App() {
     stopCollaboration,
     broadcastLocalUpdate,
     broadcastLocalDelete,
+    broadcastLocalFolderUpdate,
+    broadcastLocalFolderDelete,
     broadcastNotebookRename,
     applyNativeUpdate,
     inviteModalOpen,
@@ -723,7 +824,13 @@ function App() {
       setIsLoading(true);
       try {
         const loadStartedAtVersion = notesMutationVersionRef.current;
-        const notebookFolders = await dbService.getAllFolders(selectedNotebookId);
+        const folderLoadStartedAtVersion = foldersMutationVersionRef.current;
+        let notebookFolders = await dbService.getAllFolders(selectedNotebookId);
+        const foldersChangedDuringLoad = folderLoadStartedAtVersion !== foldersMutationVersionRef.current;
+        if (foldersChangedDuringLoad) {
+          notebookFolders = await dbService.getAllFolders(selectedNotebookId);
+        }
+        foldersRef.current = notebookFolders;
         setFolders(notebookFolders);
 
         let notebookNotes = await dbService.getAllNotes(selectedNotebookId);
@@ -934,19 +1041,71 @@ function App() {
     }
   };
 
+  const applyFolderUpdate = useCallback((
+    folderId: string,
+    updates: Partial<Omit<Folder, 'id' | 'createdAt' | 'updatedAt' | 'notebookId'>>,
+  ): Promise<Folder | undefined> => {
+    const currentFolder = foldersRef.current.find((folder) => folder.id === folderId);
+    if (!currentFolder) return Promise.resolve(undefined);
+    const key = collaborationFolderKey(currentFolder.notebookId, folderId);
+    if (tombstonedFolderIdsRef.current.has(key)) return Promise.resolve(undefined);
+
+    const optimisticFolder: Folder = {
+      ...currentFolder,
+      ...updates,
+      updatedAt: Math.max(Date.now(), currentFolder.updatedAt + 1),
+    };
+    localFolderRevisionsRef.current.set(key, (localFolderRevisionsRef.current.get(key) ?? 0) + 1);
+    foldersMutationVersionRef.current += 1;
+    const optimisticFolders = foldersRef.current
+      .map((folder) => folder.id === folderId ? optimisticFolder : folder)
+      .sort((left, right) => left.name.localeCompare(right.name));
+    foldersRef.current = optimisticFolders;
+    setFolders(optimisticFolders);
+
+    broadcastLocalFolderUpdate(optimisticFolder);
+    const previousUpdate = folderUpdateQueuesRef.current.get(key) || Promise.resolve(undefined);
+    const queuedUpdate = previousUpdate
+      .catch(() => undefined)
+      .then(async (): Promise<Folder | undefined> => {
+        if (tombstonedFolderIdsRef.current.has(key)) return undefined;
+        await dbService.upsertExternalFolder(optimisticFolder);
+        return optimisticFolder;
+      });
+    folderUpdateQueuesRef.current.set(key, queuedUpdate);
+    queuedUpdate.finally(() => {
+      if (folderUpdateQueuesRef.current.get(key) === queuedUpdate) {
+        folderUpdateQueuesRef.current.delete(key);
+      }
+    });
+    return queuedUpdate;
+  }, [broadcastLocalFolderUpdate]);
+
   const handleCreateFolder = async (name: string, parentFolderId: string | null) => {
-    if (!selectedNotebookId) {
+    const notebookId = selectedNotebookIdRef.current;
+    if (!notebookId) {
       showToast('Error', 'Please select a notebook first', 'destructive');
       return;
     }
     try {
       const newFolder = await dbService.createFolder({
-        notebookId: selectedNotebookId!,
+        notebookId,
         name,
         parentFolderId,
       });
-
-      setFolders([...folders, newFolder]);
+      const key = collaborationFolderKey(notebookId, newFolder.id);
+      localFolderRevisionsRef.current.set(key, (localFolderRevisionsRef.current.get(key) ?? 0) + 1);
+      tombstonedFolderIdsRef.current.delete(key);
+      foldersMutationVersionRef.current += 1;
+      if (selectedNotebookIdRef.current === notebookId) {
+        const nextFolders = [
+          ...foldersRef.current.filter((folder) => folder.id !== newFolder.id),
+          newFolder,
+        ].sort((left, right) => left.name.localeCompare(right.name));
+        foldersRef.current = nextFolders;
+        setFolders(nextFolders);
+      }
+      broadcastLocalFolderUpdate(newFolder);
       showToast('Success', 'New folder created');
     } catch (error) {
       console.error('Failed to create folder:', error);
@@ -961,16 +1120,48 @@ function App() {
       const affectedNotes = notesRef.current.filter((note) => (
         note.notebookId === folderToDelete.notebookId && note.folderId === folderId
       ));
-      await Promise.all(affectedNotes.map((note) => (
-        handleUpdateNote(note.id, { folderId: folderToDelete.parentFolderId })
-      )));
-      await dbService.deleteFolder(folderId);
+      const affectedFolders = foldersRef.current.filter((folder) => (
+        folder.notebookId === folderToDelete.notebookId && folder.parentFolderId === folderId
+      ));
+      await Promise.all([
+        ...affectedNotes.map((note) => (
+          handleUpdateNote(note.id, { folderId: folderToDelete.parentFolderId })
+        )),
+        ...affectedFolders.map((folder) => (
+          applyFolderUpdate(folder.id, { parentFolderId: folderToDelete.parentFolderId })
+        )),
+      ]);
 
-      setFolders((previous) => previous
+      const deletedAt = Date.now();
+      const key = collaborationFolderKey(folderToDelete.notebookId, folderId);
+      localFolderRevisionsRef.current.set(key, (localFolderRevisionsRef.current.get(key) ?? 0) + 1);
+      tombstonedFolderIdsRef.current.add(key);
+      foldersMutationVersionRef.current += 1;
+      const nextFolders = foldersRef.current
         .filter(folder => folder.id !== folderId)
         .map((folder) => folder.parentFolderId === folderId
           ? { ...folder, parentFolderId: folderToDelete.parentFolderId }
-          : folder));
+          : folder);
+      foldersRef.current = nextFolders;
+      setFolders(nextFolders);
+
+      const broadcastDelete = broadcastLocalFolderDelete(folderToDelete, deletedAt);
+      const previousUpdate = folderUpdateQueuesRef.current.get(key) || Promise.resolve(undefined);
+      const queuedDelete = previousUpdate
+        .catch(() => undefined)
+        .then(async (): Promise<Folder | undefined> => {
+          await broadcastDelete;
+          await dbService.deleteFolder(folderId);
+          return undefined;
+        });
+      folderUpdateQueuesRef.current.set(key, queuedDelete);
+      try {
+        await queuedDelete;
+      } finally {
+        if (folderUpdateQueuesRef.current.get(key) === queuedDelete) {
+          folderUpdateQueuesRef.current.delete(key);
+        }
+      }
 
       showToast('Success', 'Folder deleted');
     } catch (error) {
@@ -981,10 +1172,9 @@ function App() {
 
   const handleUpdateFolder = async (folderId: string, updates: Partial<Omit<Folder, 'id' | 'createdAt' | 'updatedAt' | 'notebookId'>>) => {
     try {
-      const updatedFolder = await dbService.updateFolder(folderId, updates);
+      const updatedFolder = await applyFolderUpdate(folderId, updates);
 
       if (updatedFolder) {
-        setFolders(folders.map(folder => folder.id === folderId ? updatedFolder : folder));
         showToast('Success', 'Folder updated');
       }
     } catch (error) {
@@ -995,12 +1185,27 @@ function App() {
 
   const handleMoveFolder = async (folderId: string, targetParentFolderId: string | null) => {
     try {
-      const updatedFolder = await dbService.moveFolder(folderId, targetParentFolderId);
+      const folder = foldersRef.current.find((candidate) => candidate.id === folderId);
+      if (!folder) return;
+      if (targetParentFolderId) {
+        const target = foldersRef.current.find((candidate) => candidate.id === targetParentFolderId);
+        if (!target || target.notebookId !== folder.notebookId) {
+          throw new Error('The destination folder is not part of this notebook');
+        }
+        let currentParentId: string | null = target.id;
+        const visited = new Set<string>();
+        while (currentParentId) {
+          if (currentParentId === folderId) {
+            console.warn(`Move of folder ${folderId} to its descendant ${targetParentFolderId} was disallowed.`);
+            return;
+          }
+          if (visited.has(currentParentId)) return;
+          visited.add(currentParentId);
+          currentParentId = foldersRef.current.find((candidate) => candidate.id === currentParentId)?.parentFolderId ?? null;
+        }
+      }
+      const updatedFolder = await applyFolderUpdate(folderId, { parentFolderId: targetParentFolderId });
       if (updatedFolder) {
-        setFolders(prevFolders => {
-          const otherFolders = prevFolders.filter(f => f.id !== folderId);
-          return [...otherFolders, updatedFolder].sort((a, b) => a.name.localeCompare(b.name));
-        });
         showToast('Success', 'Folder moved successfully');
       } else {
         console.warn(`Move of folder ${folderId} to ${targetParentFolderId} was disallowed or failed.`);

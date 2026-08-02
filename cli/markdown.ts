@@ -7,6 +7,7 @@ import {
   readdir,
   realpath,
   rename,
+  rmdir,
   unlink,
 } from 'node:fs/promises';
 import path from 'node:path';
@@ -16,6 +17,16 @@ export const MIRROR_SCHEMA = 2;
 const LEGACY_MIRROR_SCHEMA = 1;
 export const MIRROR_STATE_DIRECTORY = '.stormdance';
 export const MIRROR_MANIFEST_FILE = 'manifest.json';
+
+/**
+ * Stable IDs for folders first discovered through a linked filesystem vault.
+ * Each component is percent encoded, so the `:` delimiter is unambiguous and
+ * the same Obsidian path in two notebooks cannot collide in IndexedDB/Yjs.
+ * Existing IDs from note metadata or the manifest always take precedence.
+ */
+export const obsidianPathFolderId = (notebookId: string, relativePath: string): string => (
+  `obsidian:path:${encodeURIComponent(notebookId)}:${encodeURIComponent(relativePath)}`
+);
 
 const METADATA_PREFIX = '<!-- stormdance:';
 const METADATA_SUFFIX = ' -->';
@@ -33,6 +44,17 @@ export interface MirrorNote {
   createdAt: number;
   updatedAt: number;
   deleted?: boolean;
+}
+
+export interface MirrorFolder {
+  id: string;
+  notebookId: string;
+  name: string;
+  parentFolderId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  deleted?: boolean;
+  deletedAt?: number | null;
 }
 
 export interface MirrorManifestEntry {
@@ -58,12 +80,18 @@ export interface MaterializeResult {
   writtenPaths: string[];
   removedPaths: string[];
   protectedPaths: string[];
+  createdDirectories: string[];
+  removedDirectories: string[];
   manifest: MirrorManifest;
 }
 
 export interface MaterializeMirrorOptions {
+  /** Authoritative folder entities from the shared CRDT projection. */
+  folders?: readonly MirrorFolder[];
   /** Safe, root-relative paths discovered by scanMirror that should be adopted in place. */
   preferredPaths?: Readonly<Record<string, string>>;
+  /** Safe directory paths discovered by scanMirror that should retain their folder IDs. */
+  preferredFolderPaths?: Readonly<Record<string, string>>;
   /** Owned notes whose current files were parsed and incorporated into the CRDT by this scan. */
   acknowledgedUpsertNoteIds?: ReadonlySet<string>;
   /** Owned notes whose missing files were incorporated as deletion tombstones by this scan. */
@@ -75,20 +103,31 @@ export interface MaterializeMirrorOptions {
 export interface ScanMirrorOptions {
   createId?: () => string;
   now?: () => number;
+  /** Current CRDT folders, used to avoid emitting unchanged directory updates. */
+  knownFolders?: readonly MirrorFolder[];
 }
 
 export interface ScanMirrorResult {
   upserts: MirrorNote[];
   deletedNoteIds: string[];
+  upsertFolders: MirrorFolder[];
+  deletedFolderIds: string[];
   ignoredPaths: string[];
   preferredPaths: Record<string, string>;
+  preferredFolderPaths: Record<string, string>;
   witnesses: Record<string, ScanWitness>;
+  folderWitnesses: Record<string, ScanFolderWitness>;
 }
 
 export interface ScanWitness {
   path: string;
   /** `null` means the manifest-owned path was observed absent. */
   hash: string | null;
+}
+
+export interface ScanFolderWitness {
+  path: string;
+  present: boolean;
 }
 
 interface MirrorMetadata {
@@ -341,7 +380,9 @@ export function parseMirrorNote(source: string, options: ParseMirrorNoteOptions 
     const withoutMetadata = `${source.slice(0, located.start)}${source.slice(located.end)}`;
     const parsed = parseUserMarkdown(withoutMetadata, options.fileName);
     const parent = options.fileName ? path.posix.dirname(options.fileName) : '.';
-    const inferredFolder = parent !== '.' ? `obsidian:path:${parent}` : null;
+    const inferredFolder = parent !== '.'
+      ? obsidianPathFolderId(metadata.notebookId, parent)
+      : null;
     return {
       id: metadata.noteId,
       notebookId: metadata.notebookId,
@@ -363,7 +404,7 @@ export function parseMirrorNote(source: string, options: ParseMirrorNoteOptions 
   return {
     id: options.noteId ?? randomUUID(),
     notebookId: options.notebookId,
-    folderId: parent === '.' ? null : `obsidian:path:${parent}`,
+    folderId: parent === '.' ? null : obsidianPathFolderId(options.notebookId, parent),
     title: parsed.title,
     content: parsed.content,
     createdAt: options.createdAt ?? timestamp,
@@ -563,6 +604,57 @@ const ensureSafeParent = async (root: string, relativePath: string): Promise<voi
   }
 };
 
+const resolveSafeMirrorDirectory = (root: string, relativePath: string): string | null => {
+  if (!relativePath || !isSafeRelativeDirectory(relativePath)) return null;
+  const components = pathComponents(relativePath);
+  if (!components) return null;
+  const resolved = path.resolve(root, ...components);
+  const relative = path.relative(root, resolved);
+  return relative && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative)
+    ? resolved
+    : null;
+};
+
+const ensureSafeDirectory = async (root: string, relativePath: string): Promise<boolean> => {
+  const components = pathComponents(relativePath);
+  if (!components) throw new Error(`Unsafe mirror directory: ${relativePath}`);
+  let current = root;
+  let created = false;
+  for (const component of components) {
+    current = path.join(current, component);
+    const existing = await safeLstat(current);
+    if (existing) {
+      if (existing.isSymbolicLink() || !existing.isDirectory()) {
+        throw new Error(`Unsafe mirror directory: ${relativePath}`);
+      }
+      continue;
+    }
+    await mkdir(current);
+    created = true;
+  }
+  const canonical = await realpath(path.join(root, ...components));
+  const relative = path.relative(root, canonical);
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(`Unsafe mirror directory: ${relativePath}`);
+  }
+  return created;
+};
+
+const removeEmptyOwnedDirectory = async (root: string, relativePath: string): Promise<boolean> => {
+  const destination = resolveSafeMirrorDirectory(root, relativePath);
+  if (!destination) return false;
+  const existing = await safeLstat(destination);
+  if (!existing || existing.isSymbolicLink() || !existing.isDirectory()) return false;
+  if ((await readdir(destination)).length > 0) return false;
+  try {
+    await rmdir(destination);
+    return true;
+  } catch (error) {
+    if (isErrno(error, 'ENOENT') || isErrno(error, 'ENOTEMPTY')) return false;
+    throw error;
+  }
+};
+
 const validateExistingParent = async (root: string, relativePath: string): Promise<boolean> => {
   const components = pathComponents(relativePath);
   if (!components || !isSafeMarkdownPath(relativePath)) {
@@ -607,6 +699,17 @@ const witnessMatches = async (
   }
 };
 
+const folderWitnessMatches = async (
+  root: string,
+  witness: ScanFolderWitness,
+): Promise<boolean> => {
+  const destination = resolveSafeMirrorDirectory(root, witness.path);
+  if (!destination) return false;
+  const existing = await safeLstat(destination);
+  if (!witness.present) return existing === null;
+  return Boolean(existing?.isDirectory() && !existing.isSymbolicLink());
+};
+
 const removeOwnedFile = async (root: string, relativePath: string): Promise<boolean> => {
   const filePath = resolveSafeMirrorPath(root, relativePath);
   if (!filePath) return false;
@@ -615,6 +718,139 @@ const removeOwnedFile = async (root: string, relativePath: string): Promise<bool
   if (!stat || stat.isSymbolicLink() || !stat.isFile()) return false;
   await unlink(filePath);
   return true;
+};
+
+export function sanitizeMirrorFolderName(name: string): string {
+  const value = Array.from(name)
+    .map((character) => (
+      (character.codePointAt(0) ?? 0) <= 0x1f || '<>:"/\\|?*'.includes(character)
+        ? '-'
+        : character
+    ))
+    .join('')
+    .replace(/[\r\n]+/gu, ' ')
+    .trim()
+    .replace(/[ .]+$/u, '')
+    .slice(0, 96)
+    .replace(/[ .]+$/u, '');
+  const fallback = value && value !== '.' && value !== '..' ? value : 'Untitled';
+  const safe = fallback.startsWith('.') || WINDOWS_DEVICE_NAME.test(fallback)
+    ? `_${fallback.replace(/^\.+/u, '') || 'Untitled'}`
+    : fallback;
+  return isSafePathComponent(safe) ? safe : 'Untitled';
+}
+
+const parentDirectory = (relativePath: string): string => {
+  const parent = path.posix.dirname(relativePath);
+  return parent === '.' ? '' : parent;
+};
+
+const joinRelative = (directory: string, name: string): string => (
+  directory ? `${directory}/${name}` : name
+);
+
+const allocateFolderPath = async (
+  root: string,
+  parent: string,
+  name: string,
+  folderId: string,
+  claims: Map<string, string>,
+  preferred?: string,
+): Promise<string> => {
+  const safeName = sanitizeMirrorFolderName(name);
+  const candidates: string[] = [];
+  if (
+    preferred
+    && isSafeRelativeDirectory(preferred)
+    && parentDirectory(preferred) === parent
+    && path.posix.basename(preferred) === safeName
+  ) {
+    candidates.push(preferred);
+  }
+  candidates.push(joinRelative(parent, safeName));
+  for (let attempt = 2; attempt < 10_000; attempt += 1) {
+    candidates.push(joinRelative(parent, `${safeName} ${attempt}`));
+  }
+
+  for (const candidate of candidates) {
+    const claimedBy = claims.get(candidate);
+    if (claimedBy && claimedBy !== folderId) continue;
+    const destination = resolveSafeMirrorDirectory(root, candidate);
+    if (!destination) continue;
+    const existing = await safeLstat(destination);
+    if (existing && (existing.isSymbolicLink() || !existing.isDirectory())) continue;
+    claims.set(candidate, folderId);
+    return candidate;
+  }
+  throw new Error(`Could not allocate a collision-safe directory for folder ${folderId}`);
+};
+
+const resolveFolderPaths = async (
+  root: string,
+  folders: readonly MirrorFolder[],
+  manifest: MirrorManifest,
+  preferredPaths: Readonly<Record<string, string>> | undefined,
+): Promise<Map<string, string>> => {
+  const live = new Map(
+    folders
+      .filter((folder) => !folder.deleted)
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((folder) => [folder.id, folder] as const),
+  );
+  const resolved = new Map<string, string>();
+  const claims = new Map<string, string>();
+  const resolving = new Set<string>();
+
+  const resolve = async (folderId: string): Promise<string> => {
+    const existing = resolved.get(folderId);
+    if (existing !== undefined) return existing;
+    const folder = live.get(folderId);
+    if (!folder) return '';
+
+    // Concurrent parent moves can form a cycle. Detach the recursion edge
+    // deterministically in the projection instead of ever creating a path loop.
+    if (resolving.has(folderId)) return '';
+    resolving.add(folderId);
+    const parent = folder.parentFolderId && live.has(folder.parentFolderId)
+      ? await resolve(folder.parentFolderId)
+      : '';
+    const pathForFolder = await allocateFolderPath(
+      root,
+      parent,
+      folder.name,
+      folderId,
+      claims,
+      preferredPaths?.[folderId] ?? manifest.folders[folderId],
+    );
+    resolving.delete(folderId);
+    resolved.set(folderId, pathForFolder);
+    return pathForFolder;
+  };
+
+  for (const folderId of live.keys()) await resolve(folderId);
+  return resolved;
+};
+
+const allocateRelocatedNotePath = async (
+  root: string,
+  note: MirrorNote,
+  directory: string,
+  previousPath: string,
+  owners: Map<string, string>,
+  manifest: MirrorManifest,
+): Promise<string> => {
+  const basename = path.posix.basename(previousPath);
+  const direct = joinRelative(directory, basename);
+  const directOwner = owners.get(direct);
+  const directDestination = resolveSafeMirrorPath(root, direct);
+  const directStat = directDestination ? await safeLstat(directDestination) : null;
+  if (
+    directDestination
+    && (!directOwner || directOwner === note.id)
+    && (!directStat || (directOwner === note.id && directStat.isFile() && !directStat.isSymbolicLink()))
+  ) return direct;
+
+  return allocatePath(root, note, manifest, owners);
 };
 
 const allocatePath = async (
@@ -648,10 +884,29 @@ export async function materializeMirror(
   const root = await createRoot(rootDirectory);
   await ensureStateDirectory(root);
   const manifest = await readMirrorManifest(root);
+  const previousFolderPaths = { ...manifest.folders };
   const owners = new Map(Object.entries(manifest.notes).map(([noteId, entry]) => [entry.path, noteId]));
   const writtenPaths: string[] = [];
   const removedPaths: string[] = [];
   const protectedPaths = new Set<string>();
+  const createdDirectories: string[] = [];
+  const removedDirectories: string[] = [];
+  const folderPaths = options.folders
+    ? await resolveFolderPaths(root, options.folders, manifest, options.preferredFolderPaths)
+    : new Map<string, string>();
+
+  if (options.folders) {
+    const tombstonedFolderIds = new Set(
+      options.folders.filter((folder) => folder.deleted).map((folder) => folder.id),
+    );
+    for (const folderId of tombstonedFolderIds) delete manifest.folders[folderId];
+    for (const [folderId, folderPath] of [...folderPaths.entries()]
+      .sort((left, right) => left[1].split('/').length - right[1].split('/').length
+        || left[1].localeCompare(right[1]))) {
+      if (await ensureSafeDirectory(root, folderPath)) createdDirectories.push(folderPath);
+      manifest.folders[folderId] = folderPath;
+    }
+  }
 
   // The manifest hash is the last value written by the projection. Any
   // divergence (including a missing or replaced path) is an unsynced local
@@ -730,7 +985,21 @@ export async function materializeMirror(
         relativePath = preferredPath;
       }
     }
-    relativePath ??= previous?.path;
+    if (!relativePath && previous) {
+      const targetDirectory = note.folderId
+        ? folderPaths.get(note.folderId) ?? manifest.folders[note.folderId] ?? ''
+        : '';
+      relativePath = parentDirectory(previous.path) === targetDirectory
+        ? previous.path
+        : await allocateRelocatedNotePath(
+          root,
+          note,
+          targetDirectory,
+          previous.path,
+          owners,
+          manifest,
+        );
+    }
     relativePath ??= await allocatePath(root, note, manifest, owners);
     const destination = resolveSafeMirrorPath(root, relativePath);
     if (!destination) throw new Error(`Unsafe mirror path: ${relativePath}`);
@@ -759,6 +1028,17 @@ export async function materializeMirror(
     manifest.notes[note.id] = { path: relativePath, hash };
   }
 
+  // Folder paths are ownership hints, not permission to recursively delete.
+  // Retire only real directories that became empty after owned Markdown moved.
+  const retainedFolderPaths = new Set(Object.values(manifest.folders).filter(Boolean));
+  const retiredFolderPaths = Array.from(new Set(Object.values(previousFolderPaths)))
+    .filter((folderPath) => folderPath && !retainedFolderPaths.has(folderPath))
+    .sort((left, right) => right.split('/').length - left.split('/').length
+      || right.localeCompare(left));
+  for (const folderPath of retiredFolderPaths) {
+    if (await removeEmptyOwnedDirectory(root, folderPath)) removedDirectories.push(folderPath);
+  }
+
   const normalizedManifest = orderedManifest(manifest);
   const manifestJson = `${JSON.stringify(normalizedManifest, null, 2)}\n`;
   const manifestDestination = manifestPath(root);
@@ -775,17 +1055,21 @@ export async function materializeMirror(
     writtenPaths,
     removedPaths,
     protectedPaths: Array.from(protectedPaths).sort(),
+    createdDirectories: Array.from(new Set(createdDirectories)).sort(),
+    removedDirectories: Array.from(new Set(removedDirectories)).sort(),
     manifest: normalizedManifest,
   };
 }
 
-interface MarkdownWalk {
-  paths: string[];
+interface MirrorWalk {
+  markdownPaths: string[];
+  directoryPaths: string[];
   ignoredPaths: string[];
 }
 
-const collectMarkdownPaths = async (root: string): Promise<MarkdownWalk> => {
-  const paths: string[] = [];
+const collectMirrorPaths = async (root: string): Promise<MirrorWalk> => {
+  const markdownPaths: string[] = [];
+  const directoryPaths: string[] = [];
   const ignoredPaths: string[] = [];
 
   const visit = async (directory: string, prefix: string): Promise<void> => {
@@ -805,6 +1089,7 @@ const collectMarkdownPaths = async (root: string): Promise<MarkdownWalk> => {
       }
       if (entry.isDirectory()) {
         if (isSafeRelativeDirectory(relativePath)) {
+          directoryPaths.push(relativePath);
           await visit(path.join(directory, entry.name), relativePath);
         } else {
           ignoredPaths.push(relativePath);
@@ -812,14 +1097,29 @@ const collectMarkdownPaths = async (root: string): Promise<MarkdownWalk> => {
         continue;
       }
       if (path.posix.extname(relativePath).toLowerCase() !== '.md') continue;
-      if (entry.isFile() && isSafeMarkdownPath(relativePath)) paths.push(relativePath);
+      if (entry.isFile() && isSafeMarkdownPath(relativePath)) markdownPaths.push(relativePath);
       else ignoredPaths.push(relativePath);
     }
   };
 
   await visit(root, '');
-  return { paths: paths.sort(), ignoredPaths: ignoredPaths.sort() };
+  return {
+    markdownPaths: markdownPaths.sort(),
+    directoryPaths: directoryPaths.sort(),
+    ignoredPaths: ignoredPaths.sort(),
+  };
 };
+
+interface PreparedNote {
+  note: MirrorNote;
+  path: string;
+  ownerId: string | undefined;
+  hash: string;
+}
+
+const pathIsProtectedByIgnoredEntry = (candidate: string, ignoredPaths: readonly string[]) => (
+  ignoredPaths.some((ignored) => candidate === ignored || candidate.startsWith(`${ignored}/`))
+);
 
 export async function scanMirror(
   rootDirectory: string,
@@ -830,9 +1130,13 @@ export async function scanMirror(
   if (!root) return {
     upserts: [],
     deletedNoteIds: [],
+    upsertFolders: [],
+    deletedFolderIds: [],
     ignoredPaths: [],
     preferredPaths: {},
+    preferredFolderPaths: {},
     witnesses: {},
+    folderWitnesses: {},
   };
 
   const manifest = await readMirrorManifest(root);
@@ -840,14 +1144,15 @@ export async function scanMirror(
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? Date.now;
   const upserts: MirrorNote[] = [];
-  const walk = await collectMarkdownPaths(root);
+  const walk = await collectMirrorPaths(root);
   const ignoredPaths = [...walk.ignoredPaths];
   const preferredPaths: Record<string, string> = {};
   const witnesses: Record<string, ScanWitness> = {};
   const presentManifestPaths = new Set<string>();
   const seenNoteIds = new Set<string>();
+  const preparedNotes: PreparedNote[] = [];
 
-  const presentPaths = new Set(walk.paths);
+  const presentPaths = new Set(walk.markdownPaths);
   for (const ignoredPath of walk.ignoredPaths) {
     for (const manifestPath of ownerByPath.keys()) {
       if (manifestPath === ignoredPath || manifestPath.startsWith(`${ignoredPath}/`)) {
@@ -855,7 +1160,7 @@ export async function scanMirror(
       }
     }
   }
-  for (const relativePath of walk.paths) {
+  for (const relativePath of walk.markdownPaths) {
     const ownerId = ownerByPath.get(relativePath);
     if (ownerId) presentManifestPaths.add(relativePath);
     const filePath = resolveSafeMirrorPath(root, relativePath);
@@ -925,10 +1230,144 @@ export async function scanMirror(
 
     seenNoteIds.add(parsed.id);
     if (previous?.path === relativePath && previous.hash === hash) continue;
-    if (!ownerId) preferredPaths[parsed.id] = relativePath;
     if (previous) parsed.updatedAt = Math.max(parsed.updatedAt + 1, now());
-    witnesses[parsed.id] = { path: relativePath, hash };
-    upserts.push(parsed);
+    preparedNotes.push({ note: parsed, path: relativePath, ownerId, hash });
+  }
+
+  const directoryPaths = new Set(walk.directoryPaths);
+  const folderIdByPath = new Map<string, string>();
+  const pathByFolderId = new Map<string, string>();
+  const manifestFolderIdByPath = new Map<string, string>();
+  for (const [folderId, folderPath] of Object.entries(manifest.folders)
+    .sort(([left], [right]) => left.localeCompare(right))) {
+    if (!folderPath || manifestFolderIdByPath.has(folderPath)) continue;
+    manifestFolderIdByPath.set(folderPath, folderId);
+    if (directoryPaths.has(folderPath) && !folderIdByPath.has(folderPath)) {
+      folderIdByPath.set(folderPath, folderId);
+      pathByFolderId.set(folderId, folderPath);
+    }
+  }
+
+  // A managed note carries its old folder ID through an ordinary directory
+  // rename. Use that only when the old manifest directory is truly absent and
+  // the hint occurs in exactly one new directory; the actual destination path
+  // remains authoritative for a note moved into an existing folder.
+  const hintedPathsByFolderId = new Map<string, Set<string>>();
+  for (const prepared of preparedNotes) {
+    const hint = prepared.note.folderId;
+    const directory = parentDirectory(prepared.path);
+    const oldPath = hint ? manifest.folders[hint] : undefined;
+    if (!hint || !directory || !oldPath || directoryPaths.has(oldPath)) continue;
+    const paths = hintedPathsByFolderId.get(hint) ?? new Set<string>();
+    paths.add(directory);
+    hintedPathsByFolderId.set(hint, paths);
+  }
+  for (const [folderId, hintedPaths] of [...hintedPathsByFolderId.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))) {
+    if (hintedPaths.size !== 1 || pathByFolderId.has(folderId)) continue;
+    const [directory] = hintedPaths;
+    if (!directoryPaths.has(directory) || folderIdByPath.has(directory)) continue;
+    folderIdByPath.set(directory, folderId);
+    pathByFolderId.set(folderId, directory);
+  }
+
+  // If a nested managed folder moved as a tree, a note marker identifies the
+  // leaf. Recover same-depth missing ancestors positionally when unambiguous.
+  for (const [folderId, newPath] of [...pathByFolderId.entries()]) {
+    const oldPath = manifest.folders[folderId];
+    if (!oldPath || oldPath === newPath) continue;
+    const oldParts = oldPath.split('/');
+    const newParts = newPath.split('/');
+    if (oldParts.length !== newParts.length) continue;
+    for (let index = 1; index < oldParts.length; index += 1) {
+      const oldAncestor = oldParts.slice(0, index).join('/');
+      const newAncestor = newParts.slice(0, index).join('/');
+      const ancestorId = manifestFolderIdByPath.get(oldAncestor);
+      if (
+        ancestorId
+        && !directoryPaths.has(oldAncestor)
+        && directoryPaths.has(newAncestor)
+        && !pathByFolderId.has(ancestorId)
+        && !folderIdByPath.has(newAncestor)
+      ) {
+        folderIdByPath.set(newAncestor, ancestorId);
+        pathByFolderId.set(ancestorId, newAncestor);
+      }
+    }
+  }
+
+  // Preserve an empty folder ID across a pure move when its basename gives a
+  // unique match. A rename with no managed content is intentionally treated as
+  // delete+create because the filesystem carries no stable identity marker.
+  for (const directory of walk.directoryPaths) {
+    if (folderIdByPath.has(directory)) continue;
+    const matchingIds = Object.entries(manifest.folders)
+      .filter(([folderId, oldPath]) => (
+        oldPath
+        && !directoryPaths.has(oldPath)
+        && !pathByFolderId.has(folderId)
+        && path.posix.basename(oldPath) === path.posix.basename(directory)
+      ))
+      .map(([folderId]) => folderId);
+    if (matchingIds.length !== 1) continue;
+    const folderId = matchingIds[0];
+    const competingPaths = walk.directoryPaths.filter((candidate) => (
+      !folderIdByPath.has(candidate)
+      && path.posix.basename(candidate) === path.posix.basename(directory)
+    ));
+    if (competingPaths.length !== 1) continue;
+    folderIdByPath.set(directory, folderId);
+    pathByFolderId.set(folderId, directory);
+  }
+
+  for (const directory of walk.directoryPaths) {
+    if (folderIdByPath.has(directory)) continue;
+    const baseId = obsidianPathFolderId(notebookId, directory);
+    let folderId = baseId;
+    if (pathByFolderId.has(folderId)) folderId = `${baseId}:${stableIdFragment(directory)}`;
+    folderIdByPath.set(directory, folderId);
+    pathByFolderId.set(folderId, directory);
+  }
+
+  const knownFolders = new Map((options.knownFolders ?? []).map((folder) => [folder.id, folder]));
+  const upsertFolders: MirrorFolder[] = [];
+  const preferredFolderPaths: Record<string, string> = {};
+  const folderWitnesses: Record<string, ScanFolderWitness> = {};
+  for (const directory of walk.directoryPaths) {
+    const folderId = folderIdByPath.get(directory);
+    if (!folderId) continue;
+    const parent = parentDirectory(directory);
+    const parentFolderId = parent ? folderIdByPath.get(parent) ?? null : null;
+    const name = path.posix.basename(directory);
+    const known = knownFolders.get(folderId);
+    preferredFolderPaths[folderId] = directory;
+    folderWitnesses[folderId] = { path: directory, present: true };
+    if (
+      !known
+      || known.deleted
+      || known.name !== name
+      || known.parentFolderId !== parentFolderId
+    ) {
+      const changedAt = now();
+      upsertFolders.push({
+        id: folderId,
+        notebookId,
+        name,
+        parentFolderId,
+        createdAt: known?.createdAt ?? changedAt,
+        updatedAt: known ? Math.max(known.updatedAt + 1, changedAt) : changedAt,
+        deleted: false,
+        deletedAt: null,
+      });
+    }
+  }
+
+  for (const prepared of preparedNotes) {
+    const directory = parentDirectory(prepared.path);
+    prepared.note.folderId = directory ? folderIdByPath.get(directory) ?? null : null;
+    if (!prepared.ownerId) preferredPaths[prepared.note.id] = prepared.path;
+    witnesses[prepared.note.id] = { path: prepared.path, hash: prepared.hash };
+    upserts.push(prepared.note);
   }
 
   const deletedNoteIds = Object.entries(manifest.notes)
@@ -939,12 +1378,30 @@ export async function scanMirror(
     witnesses[noteId] = { path: manifest.notes[noteId].path, hash: null };
   }
 
+  const deletedFolderIds = Object.entries(manifest.folders)
+    .filter(([folderId, folderPath]) => (
+      folderPath
+      && !pathByFolderId.has(folderId)
+      && !directoryPaths.has(folderPath)
+      && !pathIsProtectedByIgnoredEntry(folderPath, walk.ignoredPaths)
+      && knownFolders.get(folderId)?.deleted !== true
+    ))
+    .map(([folderId, folderPath]) => {
+      folderWitnesses[folderId] = { path: folderPath, present: false };
+      return folderId;
+    })
+    .sort();
+
   return {
     upserts: upserts.sort((left, right) => left.id.localeCompare(right.id)),
     deletedNoteIds,
+    upsertFolders: upsertFolders.sort((left, right) => left.id.localeCompare(right.id)),
+    deletedFolderIds,
     ignoredPaths: ignoredPaths.sort(),
     preferredPaths: Object.fromEntries(Object.entries(preferredPaths).sort(([left], [right]) => left.localeCompare(right))),
+    preferredFolderPaths: Object.fromEntries(Object.entries(preferredFolderPaths).sort(([left], [right]) => left.localeCompare(right))),
     witnesses: Object.fromEntries(Object.entries(witnesses).sort(([left], [right]) => left.localeCompare(right))),
+    folderWitnesses: Object.fromEntries(Object.entries(folderWitnesses).sort(([left], [right]) => left.localeCompare(right))),
   };
 }
 
@@ -962,12 +1419,17 @@ export async function revalidateScanMirror(
     return {
       upserts: [],
       deletedNoteIds: [],
+      upsertFolders: [],
+      deletedFolderIds: [],
       ignoredPaths: Array.from(new Set([
         ...scanned.ignoredPaths,
         ...Object.values(scanned.witnesses).map((witness) => witness.path),
+        ...Object.values(scanned.folderWitnesses).map((witness) => witness.path),
       ])).sort(),
       preferredPaths: {},
+      preferredFolderPaths: {},
       witnesses: {},
+      folderWitnesses: {},
     };
   }
 
@@ -978,16 +1440,37 @@ export async function revalidateScanMirror(
   const stalePaths = Object.entries(scanned.witnesses)
     .filter(([noteId]) => !validIds.has(noteId))
     .map(([, witness]) => witness.path);
+  const validFolderIds = new Set<string>();
+  for (const [folderId, witness] of Object.entries(scanned.folderWitnesses)) {
+    if (await folderWitnessMatches(root, witness)) validFolderIds.add(folderId);
+  }
+  const staleFolderPaths = Object.entries(scanned.folderWitnesses)
+    .filter(([folderId]) => !validFolderIds.has(folderId))
+    .map(([, witness]) => witness.path);
 
   return {
     upserts: scanned.upserts.filter((note) => validIds.has(note.id)),
     deletedNoteIds: scanned.deletedNoteIds.filter((noteId) => validIds.has(noteId)),
-    ignoredPaths: Array.from(new Set([...scanned.ignoredPaths, ...stalePaths])).sort(),
+    upsertFolders: scanned.upsertFolders.filter((folder) => validFolderIds.has(folder.id)),
+    deletedFolderIds: scanned.deletedFolderIds.filter((folderId) => validFolderIds.has(folderId)),
+    ignoredPaths: Array.from(new Set([
+      ...scanned.ignoredPaths,
+      ...stalePaths,
+      ...staleFolderPaths,
+    ])).sort(),
     preferredPaths: Object.fromEntries(
       Object.entries(scanned.preferredPaths).filter(([noteId]) => validIds.has(noteId)),
     ),
+    preferredFolderPaths: Object.fromEntries(
+      Object.entries(scanned.preferredFolderPaths)
+        .filter(([folderId]) => validFolderIds.has(folderId)),
+    ),
     witnesses: Object.fromEntries(
       Object.entries(scanned.witnesses).filter(([noteId]) => validIds.has(noteId)),
+    ),
+    folderWitnesses: Object.fromEntries(
+      Object.entries(scanned.folderWitnesses)
+        .filter(([folderId]) => validFolderIds.has(folderId)),
     ),
   };
 }

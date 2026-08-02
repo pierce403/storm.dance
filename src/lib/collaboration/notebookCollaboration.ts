@@ -7,6 +7,7 @@ import {
 import {
   NotebookCrdt,
   mergeCrdtUpdates,
+  type CrdtFolderInput,
   type CrdtNoteInput,
   type NotebookCrdtProjection,
   type NotebookSeed,
@@ -37,6 +38,10 @@ export const parseGroupDescription = (description: string | undefined) => {
 };
 
 export interface NoteShape extends CrdtNoteInput {
+  notebookId: string;
+}
+
+export interface FolderShape extends CrdtFolderInput {
   notebookId: string;
 }
 
@@ -98,6 +103,7 @@ export type StateHandler = (state: Uint8Array, conversationId: string | null) =>
 export interface NotebookCollaborationSessionOptions {
   notebook: NotebookSeed;
   notes: CrdtNoteInput[];
+  folders?: CrdtFolderInput[];
   client: XmtpClientLike;
   onRemoteProjection: ProjectionHandler;
   onStateChange: StateHandler;
@@ -131,6 +137,7 @@ export class NotebookCollaborationSession {
   private readonly crdt: NotebookCrdt;
   private hasAuthoritativeState: boolean;
   private deferredRecoveryNotes: Map<string, CrdtNoteInput> | null = null;
+  private deferredRecoveryFolders: Map<string, CrdtFolderInput> | null = null;
   private readonly reassembler = new ProtocolReassembler();
   private readonly debugLoggingEnabled: boolean;
   private conversation: XmtpGroupLike | null = null;
@@ -158,6 +165,8 @@ export class NotebookCollaborationSession {
     this.crdt = new NotebookCrdt(options.notebook.id);
     this.hasAuthoritativeState = !this.conversationId || Boolean(options.initialState?.byteLength);
 
+    const localFolders = options.folders ?? [];
+    const migratePersistedFolders = Boolean(options.initialState?.byteLength && localFolders.length);
     if (options.initialState?.byteLength) {
       this.crdt.applyUpdate(options.initialState);
     } else if (this.conversationId) {
@@ -166,17 +175,19 @@ export class NotebookCollaborationSession {
       // their shared Yjs identities; local rows are only a materialized view.
       this.crdt.seed(options.notebook);
       this.deferredRecoveryNotes = new Map(options.notes.map((note) => [note.id, { ...note }]));
+      this.deferredRecoveryFolders = new Map(localFolders.map((folder) => [folder.id, { ...folder }]));
     } else {
       // Once a persisted Y.Doc exists it is the source of truth. Re-seeding it
       // from IndexedDB rows can replay a stale materialized projection after a
       // crash and turn that stale value into a new local Yjs edit.
-      this.crdt.seed(options.notebook, options.notes);
+      this.crdt.seed(options.notebook, options.notes, localFolders);
     }
     this.stopCapturing = this.crdt.captureLocalUpdates((update) => {
       this.pendingUpdates.push(update);
       this.scheduleBatch();
       this.schedulePersist();
     });
+    if (migratePersistedFolders) this.recoverLocalFolders(localFolders);
   }
 
   get topic() {
@@ -291,6 +302,18 @@ export class NotebookCollaborationSession {
     this.crdt.upsertNote(note);
   }
 
+  upsertLocalFolder(folder: FolderShape) {
+    if (this.stopped || folder.notebookId !== this.notebook.id) return;
+    if (this.deferredRecoveryFolders) {
+      const current = this.deferredRecoveryFolders.get(folder.id);
+      if (!current || folder.updatedAt >= current.updatedAt) {
+        this.deferredRecoveryFolders.set(folder.id, { ...folder });
+      }
+      return;
+    }
+    this.crdt.upsertFolder(folder);
+  }
+
   deleteLocalNote(noteId: string, deletedAt = Date.now()) {
     if (this.stopped) return;
     if (this.deferredRecoveryNotes) {
@@ -306,6 +329,23 @@ export class NotebookCollaborationSession {
       return;
     }
     this.crdt.deleteNote(noteId, deletedAt);
+  }
+
+  deleteLocalFolder(folderId: string, deletedAt = Date.now()) {
+    if (this.stopped) return;
+    if (this.deferredRecoveryFolders) {
+      const current = this.deferredRecoveryFolders.get(folderId);
+      if (current && deletedAt >= current.updatedAt) {
+        this.deferredRecoveryFolders.set(folderId, {
+          ...current,
+          deleted: true,
+          deletedAt,
+          updatedAt: deletedAt,
+        });
+      }
+      return;
+    }
+    this.crdt.deleteFolder(folderId, deletedAt);
   }
 
   updateNotebook(name: string, updatedAt = Date.now()) {
@@ -655,7 +695,11 @@ export class NotebookCollaborationSession {
     if (this.hasAuthoritativeState) return;
     this.hasAuthoritativeState = true;
     const recoveryNotes = this.deferredRecoveryNotes;
+    const recoveryFolders = this.deferredRecoveryFolders;
     this.deferredRecoveryNotes = null;
+    this.deferredRecoveryFolders = null;
+
+    if (recoveryFolders) this.recoverLocalFolders(recoveryFolders.values());
     if (!recoveryNotes) return;
 
     for (const note of recoveryNotes.values()) {
@@ -668,6 +712,21 @@ export class NotebookCollaborationSession {
         this.crdt.upsertNote(note);
       } catch (error) {
         if (this.debugLoggingEnabled) console.warn('Could not recover a local note into Yjs state', error);
+      }
+    }
+  }
+
+  private recoverLocalFolders(folders: Iterable<CrdtFolderInput>) {
+    for (const folder of folders) {
+      const remote = this.crdt.getFolder(folder.id);
+      if (remote && folder.updatedAt <= remote.updatedAt) continue;
+      try {
+        // Legacy persisted Yjs states did not contain folder entities. Recover
+        // IndexedDB rows only when the shared document has no such folder or
+        // the local row is newer, preserving authoritative folder tombstones.
+        this.crdt.upsertFolder(folder);
+      } catch (error) {
+        if (this.debugLoggingEnabled) console.warn('Could not recover a local folder into Yjs state', error);
       }
     }
   }

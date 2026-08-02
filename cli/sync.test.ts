@@ -10,6 +10,7 @@ import {
 } from '../src/lib/collaboration/protocol.js';
 import {
   materializeMirror,
+  obsidianPathFolderId,
   parseMirrorNote,
   readMirrorManifest,
   serializeMirrorNote,
@@ -274,6 +275,67 @@ describe('directory sync', () => {
     expect((await readCrdtState(root))?.byteLength).toBeGreaterThan(0);
     expect(logicalMessages(group.sent).some((message) => message.kind === 'sync-request')).toBe(true);
     expect(warnings).toContain('Rejected an invalid Yjs update.');
+    remote.destroy();
+  });
+
+  it('materializes remote folder trees and publishes an empty CLI directory as CRDT state', async () => {
+    const root = await makeTemporaryDirectory();
+    await writeLinkConfig(root, config());
+    const group = new FakeGroup();
+    const remote = remoteDocument();
+    remote.upsertFolder({
+      id: 'remote-folder',
+      name: 'Research',
+      parentFolderId: null,
+      createdAt: 21,
+      updatedAt: 21,
+    });
+    remote.upsertNote({
+      ...remote.snapshot().notes[0],
+      folderId: 'remote-folder',
+      updatedAt: 22,
+    });
+    group.addHistory({
+      kind: 'snapshot',
+      notebookId: 'notebook-1',
+      messageId: 'folder-snapshot',
+      sentAt: 30,
+      update: remote.encodeUpdate(),
+    });
+    const session = new NotebookDirectorySync({
+      rootDirectory: root,
+      config: config(),
+      group,
+      inboxId: 'cli-inbox',
+    });
+    await session.start();
+
+    const manifest = await readMirrorManifest(root);
+    expect(manifest.folders['remote-folder']).toBe('Research');
+    expect(manifest.notes['note-1'].path).toMatch(/^Research\//u);
+    expect(parseMirrorNote(
+      await readFile(path.join(root, manifest.notes['note-1'].path), 'utf8'),
+    )).toMatchObject({ id: 'note-1', folderId: 'remote-folder' });
+
+    await mkdir(path.join(root, 'Ideas'));
+    await session.scanNow();
+    const ideasId = obsidianPathFolderId('notebook-1', 'Ideas');
+    expect(session.projection.folders).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: ideasId,
+        name: 'Ideas',
+        parentFolderId: null,
+        deleted: false,
+      }),
+    ]));
+    await session.stop();
+
+    for (const message of logicalMessages(group.sent)) {
+      if (message.kind === 'update' && !message.targetInboxId) remote.applyUpdate(message.update);
+    }
+    expect(remote.snapshot().folders).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: ideasId, name: 'Ideas' }),
+    ]));
     remote.destroy();
   });
 

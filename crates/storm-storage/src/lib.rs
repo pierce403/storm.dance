@@ -13,7 +13,7 @@ use atomicwrites::{AllowOverwrite, AtomicFile};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use storm_core::{CoreError, Note, NotebookCrdt, NotebookSeed, NotebookSnapshot};
+use storm_core::{CoreError, Folder, Note, NotebookCrdt, NotebookSeed, NotebookSnapshot};
 use thiserror::Error;
 use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
@@ -29,6 +29,7 @@ const MAX_CONFIG_BYTES: u64 = 64 * 1024;
 const MAX_MARKDOWN_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_STATE_BYTES: u64 = MAX_MARKDOWN_BYTES * 4;
 const MAX_MANIFEST_BYTES: u64 = MAX_CONFIG_BYTES * 16;
+const MAX_SAFE_TIMESTAMP: u64 = 9_007_199_254_740_991;
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -153,11 +154,20 @@ struct Metadata {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ScanResult {
+    pub folder_upserts: Vec<Folder>,
+    pub deleted_folder_ids: Vec<String>,
+    pub folder_witnesses: BTreeMap<String, FolderScanWitness>,
     pub upserts: Vec<Note>,
     pub deleted_note_ids: Vec<String>,
     pub ignored_paths: Vec<String>,
     pub preferred_paths: BTreeMap<String, String>,
     pub witnesses: BTreeMap<String, ScanWitness>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FolderScanWitness {
+    pub path: String,
+    pub exists: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -365,7 +375,8 @@ impl Mirror {
         match self.read_state()? {
             Some(update) => Ok(NotebookCrdt::from_update(config.notebook_id, &update)?),
             None => {
-                if !self.read_manifest()?.notes.is_empty() {
+                let manifest = self.read_manifest()?;
+                if !manifest.notes.is_empty() || !manifest.folders.is_empty() {
                     return Err(StorageError::InvalidManifest(
                         "state.bin is missing while the manifest still owns notes; restore state or re-link with --remove-state"
                             .to_owned(),
@@ -388,7 +399,26 @@ impl Mirror {
     }
 
     pub fn scan(&self, notebook_id: &str) -> Result<ScanResult, StorageError> {
+        self.scan_internal(notebook_id, None)
+    }
+
+    fn scan_internal(
+        &self,
+        notebook_id: &str,
+        current_projection: Option<&NotebookSnapshot>,
+    ) -> Result<ScanResult, StorageError> {
         let manifest = self.read_manifest()?;
+        let current_folders: BTreeMap<&str, &Folder> = current_projection
+            .map(|snapshot| snapshot.folders.as_slice())
+            .unwrap_or_default()
+            .iter()
+            .map(|folder| (folder.id.as_str(), folder))
+            .collect();
+        let manifest_folder_ids: BTreeMap<String, String> = manifest
+            .folders
+            .iter()
+            .map(|(id, path)| (path.clone(), id.clone()))
+            .collect();
         let owners: HashMap<String, String> = manifest
             .notes
             .iter()
@@ -397,6 +427,7 @@ impl Mirror {
         let mut result = ScanResult::default();
         let mut seen_ids = BTreeSet::new();
         let mut seen_owned_paths = BTreeSet::new();
+        let mut folder_path_hints = BTreeMap::<String, String>::new();
 
         for entry in markdown_entries(&self.root) {
             let entry = match entry {
@@ -451,6 +482,42 @@ impl Mirror {
                     continue;
                 }
             };
+            let parent = Path::new(&relative)
+                .parent()
+                .map(slash_path)
+                .unwrap_or_default();
+            if parent.is_empty() {
+                note.folder_id = None;
+            } else {
+                let carried_folder_id = note.folder_id.clone();
+                let carried_path_missing = carried_folder_id
+                    .as_ref()
+                    .and_then(|id| manifest.folders.get(id))
+                    .is_some_and(|previous_path| {
+                        let previous = self.root.join(
+                            path_from_directory_manifest(previous_path)
+                                .unwrap_or_else(|_| PathBuf::from(previous_path)),
+                        );
+                        matches!(
+                            fs::symlink_metadata(previous),
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound
+                        )
+                    });
+                let folder_id = manifest_folder_ids
+                    .get(&parent)
+                    .cloned()
+                    .or_else(|| carried_path_missing.then_some(carried_folder_id).flatten())
+                    .unwrap_or_else(|| synthesized_folder_id(notebook_id, &parent));
+                note.folder_id = Some(folder_id.clone());
+                folder_path_hints
+                    .entry(parent)
+                    .and_modify(|existing| {
+                        if folder_id.as_bytes() < existing.as_bytes() {
+                            existing.clone_from(&folder_id);
+                        }
+                    })
+                    .or_insert(folder_id);
+            }
             if seen_ids.contains(&note.id) {
                 result.ignored_paths.push(relative);
                 continue;
@@ -484,6 +551,137 @@ impl Mirror {
             result.upserts.push(note);
         }
 
+        let mut directories = BTreeMap::<String, u64>::new();
+        for entry in directory_entries(&self.root) {
+            let entry = match entry {
+                Ok(value) => value,
+                Err(path) => {
+                    result.ignored_paths.push(path);
+                    continue;
+                }
+            };
+            let relative = match relative_directory_string(&self.root, entry.path()) {
+                Ok(value) => value,
+                Err(error) => {
+                    result.ignored_paths.push(format!("{} ({error})", entry.path().display()));
+                    continue;
+                }
+            };
+            let timestamp = fs::metadata(entry.path())
+                .ok()
+                .and_then(|metadata| modified_ms(&metadata))
+                .unwrap_or_else(now_ms);
+            directories.insert(relative, timestamp);
+        }
+
+        let mut hinted_ids = BTreeMap::<String, String>::new();
+        for (path, id) in &folder_path_hints {
+            // A single former folder can be split into several directories in
+            // one scan. Preserve its ID for only the UTF-8-smallest path and
+            // synthesize distinct IDs for the others.
+            hinted_ids.entry(id.clone()).or_insert_with(|| path.clone());
+        }
+        let mut folder_ids_by_path = BTreeMap::<String, String>::new();
+        for path in directories.keys() {
+            let id = folder_path_hints
+                .get(path)
+                .filter(|id| hinted_ids.get(id.as_str()) == Some(path))
+                .cloned()
+                .or_else(|| {
+                    manifest_folder_ids.get(path).and_then(|id| {
+                        hinted_ids
+                            .get(id)
+                            .is_none_or(|hinted_path| hinted_path == path)
+                            .then_some(id.clone())
+                    })
+                })
+                .unwrap_or_else(|| synthesized_folder_id(notebook_id, path));
+            folder_ids_by_path.insert(path.clone(), id);
+        }
+        // Several notes can be moved into the same previously unknown
+        // directory in one filesystem operation. Their embedded metadata can
+        // carry different former folder IDs, so converge every note on the
+        // deterministic ID selected for its actual parent directory.
+        for note in &mut result.upserts {
+            let Some(witness) = result.witnesses.get(&note.id) else {
+                continue;
+            };
+            let parent_path = Path::new(&witness.path)
+                .parent()
+                .map(slash_path)
+                .unwrap_or_default();
+            note.folder_id = if parent_path.is_empty() {
+                None
+            } else {
+                folder_ids_by_path.get(&parent_path).cloned()
+            };
+        }
+        for (path, id) in &folder_ids_by_path {
+            let parent_path = Path::new(path)
+                .parent()
+                .map(slash_path)
+                .unwrap_or_default();
+            let name = Path::new(path)
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("Folder")
+                .to_owned();
+            let timestamp = directories.get(path).copied().unwrap_or_else(now_ms);
+            let current_folder = current_folders.get(id.as_str()).copied();
+            let (created_at, updated_at) = current_folder.map_or((timestamp, timestamp), |current| {
+                (
+                    current.created_at,
+                    timestamp
+                        .max(now_ms())
+                        .max(current.updated_at.saturating_add(1).min(MAX_SAFE_TIMESTAMP)),
+                )
+            });
+            let candidate = Folder {
+                id: id.clone(),
+                name,
+                parent_folder_id: folder_ids_by_path.get(&parent_path).cloned(),
+                created_at,
+                updated_at,
+                deleted: false,
+                deleted_at: None,
+            };
+            let already_projected = current_folder.is_some_and(|current| {
+                !current.deleted
+                    && current.name.as_str() == candidate.name.as_str()
+                    && current.parent_folder_id.as_deref()
+                        == candidate.parent_folder_id.as_deref()
+            });
+            if !already_projected {
+                result.folder_witnesses.insert(
+                    id.clone(),
+                    FolderScanWitness {
+                        path: path.clone(),
+                        exists: true,
+                    },
+                );
+                result.folder_upserts.push(candidate);
+            }
+        }
+        let seen_folder_ids: BTreeSet<String> = folder_ids_by_path.values().cloned().collect();
+        for (id, path) in &manifest.folders {
+            // An empty path is the compatibility mapping for a legacy note
+            // whose folder entity is unavailable; it represents vault root,
+            // which directory_entries intentionally does not enumerate.
+            if path.is_empty() {
+                continue;
+            }
+            if !seen_folder_ids.contains(id) && !directories.contains_key(path) {
+                result.deleted_folder_ids.push(id.clone());
+                result.folder_witnesses.insert(
+                    id.clone(),
+                    FolderScanWitness {
+                        path: path.clone(),
+                        exists: false,
+                    },
+                );
+            }
+        }
+
         for (id, entry) in &manifest.notes {
             if seen_ids.contains(id) || seen_owned_paths.contains(&entry.path) {
                 continue;
@@ -505,6 +703,10 @@ impl Mirror {
             );
         }
         result.upserts.sort_by(|left, right| left.id.cmp(&right.id));
+        result
+            .folder_upserts
+            .sort_by(|left, right| left.id.cmp(&right.id));
+        result.deleted_folder_ids.sort();
         result.ignored_paths.sort();
         Ok(result)
     }
@@ -512,7 +714,9 @@ impl Mirror {
     pub fn reconcile(&self, now: u64) -> Result<ReconcileResult, StorageError> {
         let replica = self.load_replica()?;
         let before = replica.encode_state_vector_v1();
-        let mut scan = self.scan(replica.notebook_id())?;
+        let current_projection = replica.snapshot()?;
+        let mut scan = self.scan_internal(replica.notebook_id(), Some(&current_projection))?;
+        self.revalidate_folder_witnesses(&mut scan);
         let mut current = BTreeSet::new();
         for (id, witness) in &scan.witnesses {
             let destination = self.root.join(path_from_manifest(&witness.path)?);
@@ -528,6 +732,12 @@ impl Mirror {
         scan.deleted_note_ids.retain(|id| current.contains(id));
         scan.witnesses.retain(|id, _| current.contains(id));
         scan.ignored_paths.sort();
+        for folder in &scan.folder_upserts {
+            replica.upsert_folder(folder)?;
+        }
+        for folder_id in &scan.deleted_folder_ids {
+            replica.delete_folder(folder_id, now)?;
+        }
         for note in &scan.upserts {
             replica.upsert_note(note)?;
         }
@@ -547,6 +757,31 @@ impl Mirror {
             scan,
             materialized,
         })
+    }
+
+    fn revalidate_folder_witnesses(&self, scan: &mut ScanResult) {
+        let mut current = BTreeSet::new();
+        for (id, witness) in &scan.folder_witnesses {
+            match directory_presence_inside(&self.root, &witness.path) {
+                Ok(exists) if exists == witness.exists => {
+                    current.insert(id.clone());
+                }
+                Ok(_) => scan.ignored_paths.push(format!(
+                    "{} (changed during folder reconciliation)",
+                    witness.path
+                )),
+                Err(error) => scan
+                    .ignored_paths
+                    .push(format!("{} ({error})", witness.path)),
+            }
+        }
+        scan.folder_upserts
+            .retain(|folder| current.contains(&folder.id));
+        scan.deleted_folder_ids.retain(|id| current.contains(id));
+        scan.folder_witnesses
+            .retain(|id, _| current.contains(id));
+        scan.ignored_paths.sort();
+        scan.ignored_paths.dedup();
     }
 
     /// Persist a remote CRDT state and safely project it. Unsynced local files
@@ -580,6 +815,21 @@ impl Mirror {
     ) -> Result<MaterializeResult, StorageError> {
         let mut manifest = self.read_manifest()?;
         let mut result = MaterializeResult::default();
+        let previous_folders = manifest.folders.clone();
+        let known_folder_ids: BTreeSet<String> = snapshot
+            .folders
+            .iter()
+            .map(|folder| folder.id.clone())
+            .collect();
+        let desired_folders = projected_folder_paths(snapshot);
+        for folder in &snapshot.folders {
+            if folder.deleted {
+                manifest.folders.remove(&folder.id);
+            } else if let Some(path) = desired_folders.get(&folder.id) {
+                ensure_safe_directory(&self.root, path)?;
+                manifest.folders.insert(folder.id.clone(), path.clone());
+            }
+        }
         let mut owners: HashMap<String, String> = manifest
             .notes
             .iter()
@@ -626,21 +876,57 @@ impl Mirror {
                     .get(&note.id)
                     .is_some_and(|witness| &witness.path == *preferred)
             });
+            let desired_directory = note
+                .folder_id
+                .as_ref()
+                .and_then(|id| manifest.folders.get(id))
+                .cloned()
+                .unwrap_or_default();
+            let previous_matches_folder = previous.as_ref().is_some_and(|entry| {
+                let parent = Path::new(&entry.path)
+                    .parent()
+                    .unwrap_or_else(|| Path::new(""));
+                slash_path(parent) == desired_directory
+            });
             let path = if let Some(preferred) = witnessed_preferred {
                 validate_relative_markdown(preferred)?;
                 preferred.clone()
-            } else if let Some(previous) = &previous {
+            } else if previous_matches_folder {
+                let previous = previous.as_ref().expect("checked above");
                 previous.path.clone()
             } else {
                 allocate_path(&self.root, note, &manifest, &owners)?
             };
             let destination = self.root.join(path_from_manifest(&path)?);
-            if previous.is_some() && validate_existing_parent(&self.root, &destination).is_err() {
+            let moving = previous
+                .as_ref()
+                .is_some_and(|previous| previous.path != path);
+            if moving {
+                let previous = previous.as_ref().expect("checked above");
+                let old = self.root.join(path_from_manifest(&previous.path)?);
+                if validate_existing_parent(&self.root, &old).is_err() {
+                    result.protected_paths.push(previous.path.clone());
+                    continue;
+                }
+                let disk_hash = hash_regular_inside(&self.root, &old)?;
+                let witnessed = witnesses.get(&note.id).is_some_and(|witness| {
+                    witness.path == previous.path && witness.hash == disk_hash
+                });
+                if disk_hash.as_deref() != Some(&previous.hash) && !witnessed {
+                    if let Some(conflict) =
+                        preserve_conflict(&self.root, &old, &previous.path, now, &owners)?
+                    {
+                        result.conflict_paths.push(conflict);
+                    }
+                }
+            } else if previous.is_some()
+                && validate_existing_parent(&self.root, &destination).is_err()
+            {
                 result.protected_paths.push(path);
                 continue;
             }
             ensure_safe_parent(&self.root, &destination)?;
-            if let Some(previous) = &previous {
+            if let Some(previous) = previous.as_ref().filter(|_| !moving) {
                 let disk_hash = hash_regular_inside(&self.root, &destination)?;
                 let witnessed = witnesses
                     .get(&note.id)
@@ -670,7 +956,14 @@ impl Mirror {
                     owners.remove(&previous.path);
                 }
             }
-            if let Some(folder) = note.folder_id.as_ref() {
+            if let Some(folder) = note
+                .folder_id
+                .as_ref()
+                .filter(|folder| !known_folder_ids.contains(*folder))
+            {
+                // Legacy documents can contain folderId values without the
+                // additive folders root. Retain that compatibility mapping,
+                // but never recreate a known folder that was tombstoned.
                 let parent = Path::new(&path).parent().unwrap_or_else(|| Path::new(""));
                 manifest.folders.insert(folder.clone(), slash_path(parent));
             }
@@ -678,6 +971,19 @@ impl Mirror {
             manifest
                 .notes
                 .insert(note.id.clone(), ManifestEntry { path, hash });
+        }
+        let current_folder_paths: BTreeSet<String> = manifest.folders.values().cloned().collect();
+        let mut stale_folder_paths: Vec<String> = previous_folders
+            .into_iter()
+            .filter_map(|(id, previous)| {
+                (manifest.folders.get(&id) != Some(&previous)).then_some(previous)
+            })
+            .filter(|path| !path.is_empty() && !current_folder_paths.contains(path))
+            .collect();
+        stale_folder_paths.sort_by_key(|path| std::cmp::Reverse(path.matches('/').count()));
+        stale_folder_paths.dedup();
+        for path in stale_folder_paths {
+            let _removed = remove_empty_directory_inside(&self.root, &path)?;
         }
         result.written_paths.sort();
         result.removed_paths.sort();
@@ -692,9 +998,18 @@ impl Mirror {
         let config = self.read_link().ok();
         let manifest = self.read_manifest()?;
         let (pending_local_changes, ignored_paths) = if let Some(config) = &config {
-            let scan = self.scan(&config.notebook_id)?;
+            let current_projection = match self.read_state()? {
+                Some(update) => Some(
+                    NotebookCrdt::from_update(&config.notebook_id, &update)?.snapshot()?,
+                ),
+                None => None,
+            };
+            let scan = self.scan_internal(&config.notebook_id, current_projection.as_ref())?;
             (
-                scan.upserts.len() + scan.deleted_note_ids.len(),
+                scan.folder_upserts.len()
+                    + scan.deleted_folder_ids.len()
+                    + scan.upserts.len()
+                    + scan.deleted_note_ids.len(),
                 scan.ignored_paths,
             )
         } else {
@@ -1021,7 +1336,7 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis()
-        .min(9_007_199_254_740_991) as u64
+        .min(MAX_SAFE_TIMESTAMP as u128) as u64
 }
 
 fn modified_ms(metadata: &fs::Metadata) -> Option<u64> {
@@ -1030,7 +1345,7 @@ fn modified_ms(metadata: &fs::Metadata) -> Option<u64> {
         .ok()?
         .duration_since(UNIX_EPOCH)
         .ok()
-        .map(|value| value.as_millis().min(9_007_199_254_740_991) as u64)
+        .map(|value| value.as_millis().min(MAX_SAFE_TIMESTAMP as u128) as u64)
 }
 
 fn is_hidden(entry: &DirEntry) -> bool {
@@ -1058,12 +1373,33 @@ fn markdown_entries(root: &Path) -> impl Iterator<Item = Result<DirEntry, String
         })
 }
 
+fn directory_entries(root: &Path) -> impl Iterator<Item = Result<DirEntry, String>> {
+    WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| !is_hidden(entry))
+        .filter_map(|entry| match entry {
+            Ok(entry) if entry.depth() > 0 && entry.file_type().is_dir() => Some(Ok(entry)),
+            Ok(_) => None,
+            Err(error) => Some(Err(error.to_string())),
+        })
+}
+
 fn relative_string(root: &Path, path: &Path) -> Result<String, StorageError> {
     let relative = path
         .strip_prefix(root)
         .map_err(|_| StorageError::UnsafePath(path.display().to_string()))?;
     let string = slash_path(relative);
     validate_relative_markdown(&string)?;
+    Ok(string)
+}
+
+fn relative_directory_string(root: &Path, path: &Path) -> Result<String, StorageError> {
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| StorageError::UnsafePath(path.display().to_string()))?;
+    let string = slash_path(relative);
+    validate_relative_directory(&string)?;
     Ok(string)
 }
 
@@ -1114,6 +1450,36 @@ fn validate_relative_directory(path: &str) -> Result<(), StorageError> {
 fn path_from_manifest(path: &str) -> Result<PathBuf, StorageError> {
     validate_relative_markdown(path)?;
     Ok(path.split('/').collect())
+}
+
+fn path_from_directory_manifest(path: &str) -> Result<PathBuf, StorageError> {
+    validate_relative_directory(path)?;
+    Ok(path.split('/').collect())
+}
+
+fn encode_uri_component(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric()
+            || matches!(byte, b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')')
+        {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push('%');
+            encoded.push(char::from(HEX[(byte >> 4) as usize]));
+            encoded.push(char::from(HEX[(byte & 0x0f) as usize]));
+        }
+    }
+    encoded
+}
+
+fn synthesized_folder_id(notebook_id: &str, path: &str) -> String {
+    format!(
+        "obsidian:path:{}:{}",
+        encode_uri_component(notebook_id),
+        encode_uri_component(path)
+    )
 }
 
 fn parse_markdown(
@@ -1198,7 +1564,10 @@ fn parse_markdown(
     let inferred_folder = if parent.as_os_str().is_empty() {
         None
     } else {
-        Some(format!("obsidian:path:{}", slash_path(parent)))
+        Some(synthesized_folder_id(
+            expected_notebook_id,
+            &slash_path(parent),
+        ))
     };
     let metadata = metadata_value;
     Ok(Note {
@@ -1371,6 +1740,200 @@ fn sanitize_file_name(title: &str) -> String {
     }
 }
 
+fn projected_folder_paths(snapshot: &NotebookSnapshot) -> BTreeMap<String, String> {
+    let folders: BTreeMap<String, &Folder> = snapshot
+        .folders
+        .iter()
+        .filter(|folder| !folder.deleted)
+        .map(|folder| (folder.id.clone(), folder))
+        .collect();
+    let active: BTreeSet<String> = folders.keys().cloned().collect();
+    let mut parents: BTreeMap<String, Option<String>> = folders
+        .iter()
+        .map(|(id, folder)| {
+            let parent = folder
+                .parent_folder_id
+                .as_ref()
+                .filter(|parent| *parent != id && active.contains(*parent))
+                .cloned();
+            (id.clone(), parent)
+        })
+        .collect();
+
+    // Match the browser/core projection rules: invalid parents become roots,
+    // and every cycle is broken at its UTF-8-smallest ID. Rust string ordering
+    // is lexicographic over UTF-8 bytes, which is the browser's explicit order.
+    let mut visited = BTreeSet::new();
+    for id in folders.keys() {
+        if visited.contains(id) {
+            continue;
+        }
+        let mut path = Vec::<String>::new();
+        let mut indexes = HashMap::<String, usize>::new();
+        let mut current = Some(id.clone());
+        while let Some(current_id) = current {
+            if !active.contains(&current_id) || visited.contains(&current_id) {
+                break;
+            }
+            if let Some(cycle_start) = indexes.get(&current_id).copied() {
+                if let Some(root) = path[cycle_start..].iter().min().cloned() {
+                    parents.insert(root, None);
+                }
+                break;
+            }
+            indexes.insert(current_id.clone(), path.len());
+            path.push(current_id.clone());
+            current = parents.get(&current_id).cloned().flatten();
+        }
+        visited.extend(path);
+    }
+
+    // Allocate collision-safe components among siblings before building full
+    // paths. This means a child's path always uses its parent's final suffixed
+    // component, even when two parents sanitize to the same name.
+    let mut claimed_by_parent = BTreeMap::<Option<String>, BTreeSet<String>>::new();
+    let mut components = BTreeMap::<String, String>::new();
+    for (id, folder) in &folders {
+        let parent = parents.get(id).cloned().flatten();
+        let claimed = claimed_by_parent.entry(parent).or_default();
+        let base = sanitize_file_name(&folder.name);
+        let fragment = &sha256(id.as_bytes())[..8];
+        let mut attempt = 0usize;
+        let component = loop {
+            let candidate = match attempt {
+                0 => base.clone(),
+                1 => format!("{base}--{fragment}"),
+                _ => format!("{base}--{fragment}-{attempt}"),
+            };
+            // Allocate portable paths even when projection runs on a
+            // case-sensitive filesystem and is later opened on Windows/macOS.
+            if claimed.insert(candidate.to_lowercase()) {
+                break candidate;
+            }
+            attempt += 1;
+        };
+        components.insert(id.clone(), component);
+    }
+
+    // Resolve iteratively to avoid stack growth for deeply nested vaults.
+    let mut resolved = BTreeMap::<String, String>::new();
+    for id in folders.keys() {
+        if resolved.contains_key(id) {
+            continue;
+        }
+        let mut chain = Vec::new();
+        let mut current = Some(id.clone());
+        while let Some(current_id) = current {
+            if resolved.contains_key(&current_id) {
+                break;
+            }
+            chain.push(current_id.clone());
+            current = parents.get(&current_id).cloned().flatten();
+        }
+        while let Some(current_id) = chain.pop() {
+            let parent_path = parents
+                .get(&current_id)
+                .and_then(|parent| parent.as_ref())
+                .and_then(|parent| resolved.get(parent))
+                .cloned()
+                .unwrap_or_default();
+            let component = components
+                .get(&current_id)
+                .cloned()
+                .unwrap_or_else(|| "Folder".to_owned());
+            let path = if parent_path.is_empty() {
+                component
+            } else {
+                format!("{parent_path}/{component}")
+            };
+            resolved.insert(current_id, path);
+        }
+    }
+    resolved
+}
+
+fn ensure_safe_directory(root: &Path, relative: &str) -> Result<(), StorageError> {
+    validate_relative_directory(relative)?;
+    if relative.is_empty() {
+        return Ok(());
+    }
+    let mut current = root.to_path_buf();
+    for component in Path::new(relative).components() {
+        let Component::Normal(component) = component else {
+            return Err(StorageError::UnsafePath(relative.to_owned()));
+        };
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    return Err(StorageError::UnsafePath(current.display().to_string()));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::create_dir(&current).map_err(|error| io(&current, error))?;
+            }
+            Err(error) => return Err(io(&current, error)),
+        }
+    }
+    let canonical = fs::canonicalize(&current).map_err(|error| io(&current, error))?;
+    if !canonical.starts_with(root) {
+        return Err(StorageError::UnsafePath(current.display().to_string()));
+    }
+    Ok(())
+}
+
+fn directory_presence_inside(root: &Path, relative: &str) -> Result<bool, StorageError> {
+    let destination = root.join(path_from_directory_manifest(relative)?);
+    if !validate_existing_parent(root, &destination)? {
+        return Ok(false);
+    }
+    let metadata = match fs::symlink_metadata(&destination) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(io(&destination, error)),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(StorageError::UnsafePath(destination.display().to_string()));
+    }
+    let canonical = fs::canonicalize(&destination).map_err(|error| io(&destination, error))?;
+    if !canonical.starts_with(root) {
+        return Err(StorageError::UnsafePath(destination.display().to_string()));
+    }
+    Ok(true)
+}
+
+fn remove_empty_directory_inside(root: &Path, relative: &str) -> Result<bool, StorageError> {
+    validate_relative_directory(relative)?;
+    if relative.is_empty() {
+        return Ok(false);
+    }
+    let destination = root.join(path_from_directory_manifest(relative)?);
+    let metadata = match fs::symlink_metadata(&destination) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(io(&destination, error)),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Ok(false);
+    }
+    let canonical = fs::canonicalize(&destination).map_err(|error| io(&destination, error))?;
+    if !canonical.starts_with(root) {
+        return Err(StorageError::UnsafePath(destination.display().to_string()));
+    }
+    match fs::remove_dir(&destination) {
+        Ok(()) => Ok(true),
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+            ) =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(io(&destination, error)),
+    }
+}
+
 fn allocate_path(
     root: &Path,
     note: &Note,
@@ -1493,6 +2056,18 @@ mod tests {
         }
     }
 
+    fn folder(id: &str, name: &str, parent: Option<&str>) -> Folder {
+        Folder {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            parent_folder_id: parent.map(str::to_owned),
+            created_at: 1,
+            updated_at: 2,
+            deleted: false,
+            deleted_at: None,
+        }
+    }
+
     fn snapshot(notes: Vec<Note>) -> NotebookSnapshot {
         NotebookSnapshot {
             schema_version: 1,
@@ -1502,7 +2077,15 @@ mod tests {
                 created_at: 1,
                 updated_at: 2,
             },
+            folders: Vec::new(),
             notes,
+        }
+    }
+
+    fn snapshot_with_folders(folders: Vec<Folder>, notes: Vec<Note>) -> NotebookSnapshot {
+        NotebookSnapshot {
+            folders,
+            ..snapshot(notes)
         }
     }
 
@@ -1521,7 +2104,7 @@ mod tests {
         assert_eq!(scan.upserts.len(), 1);
         assert_eq!(
             scan.upserts[0].folder_id.as_deref(),
-            Some("obsidian:path:Sources")
+            Some("obsidian:path:notebook-1:Sources")
         );
         assert!(scan.upserts[0].content.starts_with("---\ntags:"));
 
@@ -1537,6 +2120,266 @@ mod tests {
             .map_err(|error| io("libxmtp", error))?;
         assert!(output.starts_with("---\ntags: [xmtp]\n---\n<!-- stormdance:"));
         assert!(output.contains("[[Other note]]"));
+        Ok(())
+    }
+
+    #[test]
+    fn remote_folder_tree_creates_empty_directories_and_moves_owned_notes(
+    ) -> Result<(), StorageError> {
+        let directory = tempdir().map_err(|error| io("temp", error))?;
+        let mirror = Mirror::open(directory.path())?;
+        mirror.write_link(&config())?;
+        let initial = snapshot_with_folders(
+            vec![
+                folder("research", "Research", None),
+                folder("protocol", "Protocol", Some("research")),
+                folder("empty", "Empty", None),
+            ],
+            vec![note("n1", "Design", Some("protocol"))],
+        );
+        let first = mirror.materialize(&initial, 1)?;
+        assert!(directory.path().join("Empty").is_dir());
+        assert!(first.manifest.notes["n1"]
+            .path
+            .starts_with("Research/Protocol/"));
+
+        let moved = snapshot_with_folders(
+            vec![
+                folder("research", "Research", None),
+                folder("protocol", "Archive", None),
+                folder("empty", "Empty", None),
+            ],
+            vec![note("n1", "Design", Some("protocol"))],
+        );
+        let second = mirror.materialize(&moved, 2)?;
+        assert!(second.manifest.notes["n1"].path.starts_with("Archive/"));
+        assert!(!directory
+            .path()
+            .join(&first.manifest.notes["n1"].path)
+            .exists());
+        assert!(!directory.path().join("Research/Protocol").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn idle_projected_folders_do_not_create_pending_status_changes() -> Result<(), StorageError> {
+        let directory = tempdir().map_err(|error| io("temp", error))?;
+        let mirror = Mirror::open(directory.path())?;
+        mirror.write_link(&config())?;
+        let replica = NotebookCrdt::new("notebook-1")?;
+        replica.seed_with_folders(
+            &snapshot(Vec::new()).notebook,
+            &[folder("folder-a", "A", None)],
+            &[],
+        )?;
+        mirror.persist_and_materialize(&replica, 1)?;
+
+        assert_eq!(mirror.status()?.pending_local_changes, 0);
+        let reconciled = mirror.reconcile(2)?;
+        assert!(reconciled.scan.folder_upserts.is_empty());
+        assert!(reconciled.scan.deleted_folder_ids.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_manifest_folders_migrate_once_into_an_old_replica() -> Result<(), StorageError> {
+        let directory = tempdir().map_err(|error| io("temp", error))?;
+        let mirror = Mirror::open(directory.path())?;
+        mirror.write_link(&config())?;
+        fs::create_dir(directory.path().join("Research"))
+            .map_err(|error| io("Research", error))?;
+        let replica = NotebookCrdt::new("notebook-1")?;
+        replica.seed(&snapshot(Vec::new()).notebook, &[])?;
+        mirror.write_state(&replica.encode_state_as_update_v1())?;
+        let mut manifest = Manifest::default();
+        manifest
+            .folders
+            .insert("legacy-folder".to_owned(), "Research".to_owned());
+        mirror.write_manifest(&manifest)?;
+
+        assert_eq!(mirror.status()?.pending_local_changes, 1);
+        let migrated = mirror.reconcile(2)?;
+        assert_eq!(migrated.scan.folder_upserts.len(), 1);
+        assert_eq!(migrated.snapshot.folders[0].id, "legacy-folder");
+        assert_eq!(mirror.status()?.pending_local_changes, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn synthesized_folder_ids_match_node_and_are_notebook_scoped() -> Result<(), StorageError> {
+        let directory = tempdir().map_err(|error| io("temp", error))?;
+        let mirror = Mirror::open(directory.path())?;
+        mirror.write_link(&config())?;
+        fs::create_dir(directory.path().join("Research"))
+            .map_err(|error| io("Research", error))?;
+
+        let first = mirror.scan("notebook:one")?;
+        let first_id = &first.folder_upserts[0].id;
+        assert_eq!(first_id, "obsidian:path:notebook%3Aone:Research");
+        let second = mirror.scan("notebook:two")?;
+        assert_ne!(first_id, &second.folder_upserts[0].id);
+
+        let legacy_id = "obsidian:path:Research";
+        let mut manifest = Manifest::default();
+        manifest
+            .folders
+            .insert(legacy_id.to_owned(), "Research".to_owned());
+        mirror.write_manifest(&manifest)?;
+        fs::write(directory.path().join("Research/note.md"), "# Note\n")
+            .map_err(|error| io("note.md", error))?;
+        let legacy = mirror.scan("notebook:one")?;
+        assert_eq!(legacy.upserts[0].folder_id.as_deref(), Some(legacy_id));
+        assert!(legacy
+            .folder_upserts
+            .iter()
+            .any(|folder| folder.id == legacy_id));
+        Ok(())
+    }
+
+    #[test]
+    fn colliding_parent_names_keep_descendants_under_the_final_parent_path() {
+        let projection = projected_folder_paths(&snapshot_with_folders(
+            vec![
+                folder("a", "Shared", None),
+                folder("b", "Shared", None),
+                folder("child", "Child", Some("b")),
+            ],
+            Vec::new(),
+        ));
+        assert_eq!(projection["a"], "Shared");
+        assert_ne!(projection["a"], projection["b"]);
+        assert!(projection["child"].starts_with(&format!("{}/", projection["b"])));
+        assert!(!projection["child"].starts_with(&format!("{}/", projection["a"])));
+    }
+
+    #[test]
+    fn tombstoned_folder_is_not_reinserted_by_an_active_note() -> Result<(), StorageError> {
+        let directory = tempdir().map_err(|error| io("temp", error))?;
+        let mirror = Mirror::open(directory.path())?;
+        mirror.write_link(&config())?;
+        let live = folder("folder-a", "A", None);
+        mirror.materialize(
+            &snapshot_with_folders(
+                vec![live.clone()],
+                vec![note("n1", "Design", Some("folder-a"))],
+            ),
+            1,
+        )?;
+        let mut deleted = live;
+        deleted.deleted = true;
+        deleted.deleted_at = Some(2);
+        let result = mirror.materialize(
+            &snapshot_with_folders(
+                vec![deleted],
+                vec![note("n1", "Design", Some("folder-a"))],
+            ),
+            2,
+        )?;
+
+        assert!(!result.manifest.folders.contains_key("folder-a"));
+        assert_eq!(
+            Path::new(&result.manifest.notes["n1"].path).parent(),
+            Some(Path::new(""))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stale_cleanup_never_removes_a_path_reused_by_another_folder() -> Result<(), StorageError> {
+        let directory = tempdir().map_err(|error| io("temp", error))?;
+        let mirror = Mirror::open(directory.path())?;
+        mirror.write_link(&config())?;
+        mirror.materialize(
+            &snapshot_with_folders(vec![folder("one", "Shared", None)], Vec::new()),
+            1,
+        )?;
+        let result = mirror.materialize(
+            &snapshot_with_folders(
+                vec![
+                    folder("one", "Other", None),
+                    folder("two", "Shared", None),
+                ],
+                Vec::new(),
+            ),
+            2,
+        )?;
+
+        assert_eq!(result.manifest.folders["one"], "Other");
+        assert_eq!(result.manifest.folders["two"], "Shared");
+        assert!(directory.path().join("Other").is_dir());
+        assert!(directory.path().join("Shared").is_dir());
+        Ok(())
+    }
+
+    #[test]
+    fn folder_presence_witnesses_reject_raced_creates_and_deletes() -> Result<(), StorageError> {
+        let directory = tempdir().map_err(|error| io("temp", error))?;
+        let mirror = Mirror::open(directory.path())?;
+        mirror.write_link(&config())?;
+        fs::create_dir(directory.path().join("Racing"))
+            .map_err(|error| io("Racing", error))?;
+        let mut created = mirror.scan("notebook-1")?;
+        fs::remove_dir(directory.path().join("Racing"))
+            .map_err(|error| io("Racing", error))?;
+        mirror.revalidate_folder_witnesses(&mut created);
+        assert!(created.folder_upserts.is_empty());
+
+        let mut manifest = Manifest::default();
+        manifest
+            .folders
+            .insert("gone".to_owned(), "Gone".to_owned());
+        mirror.write_manifest(&manifest)?;
+        let mut deleted = mirror.scan("notebook-1")?;
+        assert_eq!(deleted.deleted_folder_ids, vec!["gone".to_owned()]);
+        fs::create_dir(directory.path().join("Gone")).map_err(|error| io("Gone", error))?;
+        mirror.revalidate_folder_witnesses(&mut deleted);
+        assert!(deleted.deleted_folder_ids.is_empty());
+        assert!(deleted
+            .ignored_paths
+            .iter()
+            .any(|path| path.contains("changed during folder reconciliation")));
+        Ok(())
+    }
+
+    #[test]
+    fn scan_projects_empty_directories_and_distinguishes_note_moves_from_folder_renames(
+    ) -> Result<(), StorageError> {
+        let directory = tempdir().map_err(|error| io("temp", error))?;
+        let mirror = Mirror::open(directory.path())?;
+        mirror.write_link(&config())?;
+        let initial = snapshot_with_folders(
+            vec![folder("folder-a", "A", None)],
+            vec![note("n1", "Design", Some("folder-a"))],
+        );
+        let first = mirror.materialize(&initial, 1)?;
+        fs::create_dir(directory.path().join("B")).map_err(|error| io("B", error))?;
+        let old_note = directory.path().join(&first.manifest.notes["n1"].path);
+        let moved_note = directory.path().join("B/design.md");
+        fs::rename(&old_note, &moved_note).map_err(|error| io("move note", error))?;
+
+        let moved_scan = mirror.scan("notebook-1")?;
+        assert_eq!(
+            moved_scan.upserts[0].folder_id.as_deref(),
+            Some("obsidian:path:notebook-1:B")
+        );
+        assert!(moved_scan
+            .folder_upserts
+            .iter()
+            .any(|candidate| {
+                candidate.id == "obsidian:path:notebook-1:B" && candidate.name == "B"
+            }));
+
+        fs::remove_dir(directory.path().join("A")).map_err(|error| io("A", error))?;
+        fs::rename(directory.path().join("B"), directory.path().join("Renamed"))
+            .map_err(|error| io("rename folder", error))?;
+        let renamed_scan = mirror.scan_internal("notebook-1", Some(&initial))?;
+        let renamed = renamed_scan
+            .folder_upserts
+            .iter()
+            .find(|candidate| candidate.id == "folder-a" && candidate.name == "Renamed")
+            .expect("renamed folder must be projected");
+        assert_eq!(renamed.created_at, 1);
+        assert!(renamed.updated_at > initial.folders[0].updated_at);
         Ok(())
     }
 

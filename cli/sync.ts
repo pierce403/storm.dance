@@ -13,6 +13,7 @@ import path from 'node:path';
 import {
   NotebookCrdt,
   mergeCrdtUpdates,
+  type CrdtFolderInput,
   type CrdtNoteInput,
   type NotebookCrdtProjection,
 } from '../src/lib/collaboration/crdt.js';
@@ -27,6 +28,7 @@ import {
   revalidateScanMirror,
   scanMirror,
   type MaterializeMirrorOptions,
+  type MirrorFolder,
   type MirrorNote,
 } from './markdown.js';
 import type {
@@ -359,6 +361,18 @@ const asCrdtNote = (note: MirrorNote): CrdtNoteInput => ({
   deleted: note.deleted,
 });
 
+const asCrdtFolder = (folder: MirrorFolder): CrdtFolderInput => ({
+  id: folder.id,
+  name: folder.name,
+  parentFolderId: folder.parentFolderId,
+  createdAt: timestamp(folder.createdAt),
+  updatedAt: timestamp(folder.updatedAt),
+  deleted: folder.deleted,
+  deletedAt: folder.deletedAt === null || folder.deletedAt === undefined
+    ? folder.deletedAt
+    : timestamp(folder.deletedAt),
+});
+
 const asMirrorNote = (
   notebookId: string,
   note: NotebookCrdtProjection['notes'][number],
@@ -371,6 +385,20 @@ const asMirrorNote = (
   createdAt: note.createdAt,
   updatedAt: note.updatedAt,
   deleted: note.deleted,
+});
+
+const asMirrorFolder = (
+  notebookId: string,
+  folder: NotebookCrdtProjection['folders'][number],
+): MirrorFolder => ({
+  id: folder.id,
+  notebookId,
+  name: folder.name,
+  parentFolderId: folder.parentFolderId,
+  createdAt: folder.createdAt,
+  updatedAt: folder.updatedAt,
+  deleted: folder.deleted,
+  deletedAt: folder.deletedAt,
 });
 
 const waitForAbort = (signal: AbortSignal | undefined): Promise<void> => {
@@ -549,16 +577,23 @@ export class NotebookDirectorySync {
       if (!this.root) return;
       const scanned = await revalidateScanMirror(
         this.root,
-        await scanMirror(this.root, this.config.notebookId),
+        await scanMirror(this.root, this.config.notebookId, {
+          knownFolders: this.crdt.snapshot().folders.map((folder) => (
+            asMirrorFolder(this.config.notebookId, folder)
+          )),
+        }),
       );
+      for (const folder of scanned.upsertFolders) this.crdt.upsertFolder(asCrdtFolder(folder));
       for (const note of scanned.upserts) this.crdt.upsertNote(asCrdtNote(note));
       const deletedAt = Date.now();
       for (const noteId of scanned.deletedNoteIds) this.crdt.deleteNote(noteId, deletedAt);
+      for (const folderId of scanned.deletedFolderIds) this.crdt.deleteFolder(folderId, deletedAt);
       if (scanned.ignoredPaths.length > 0) {
         this.warn(`Ignored ${scanned.ignoredPaths.length} unsafe or invalid Markdown file(s).`);
       }
       await this.materializeAndPersist({
         preferredPaths: scanned.preferredPaths,
+        preferredFolderPaths: scanned.preferredFolderPaths,
         witnesses: scanned.witnesses,
       });
     });
@@ -625,8 +660,6 @@ export class NotebookDirectorySync {
       if (fileName !== null) {
         const value = fileName.toString().replaceAll('\\', '/');
         if (value.split('/').some((component) => component.startsWith('.'))) return;
-        const extension = path.posix.extname(value).toLowerCase();
-        if (extension && extension !== '.md') return;
       }
       if (this.scanTimer) clearTimeout(this.scanTimer);
       this.scanTimer = setTimeout(() => {
@@ -812,7 +845,12 @@ export class NotebookDirectorySync {
     const result = await this.materialize(
       this.root,
       projection.notes.map((note) => asMirrorNote(this.config.notebookId, note)),
-      options,
+      {
+        ...options,
+        folders: projection.folders.map((folder) => (
+          asMirrorFolder(this.config.notebookId, folder)
+        )),
+      },
     );
     if (result.protectedPaths.length > 0) {
       this.warn(

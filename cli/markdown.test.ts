@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -7,10 +7,12 @@ import {
   MIRROR_SCHEMA,
   MIRROR_STATE_DIRECTORY,
   materializeMirror,
+  obsidianPathFolderId,
   parseMirrorNote,
   readMirrorManifest,
   scanMirror,
   serializeMirrorNote,
+  type MirrorFolder,
   type MirrorNote,
 } from './markdown.js';
 
@@ -35,6 +37,18 @@ const note = (overrides: Partial<MirrorNote> = {}): MirrorNote => ({
   content: 'A UTF-8 body: café 🌩️\n\n- one\n- two\n',
   createdAt: 100,
   updatedAt: 200,
+  ...overrides,
+});
+
+const folder = (overrides: Partial<MirrorFolder> = {}): MirrorFolder => ({
+  id: 'folder-1',
+  notebookId: 'notebook-1',
+  name: 'Research',
+  parentFolderId: null,
+  createdAt: 100,
+  updatedAt: 200,
+  deleted: false,
+  deletedAt: null,
   ...overrides,
 });
 
@@ -83,6 +97,47 @@ describe('Markdown materialization', () => {
     expect(renamedPath).toBe(firstPath);
     expect(renamed.removedPaths).toEqual([]);
     expect(parseMirrorNote(await readFile(path.join(root, firstPath), 'utf8')).title).toBe('Renamed Note');
+  });
+
+  it('materializes browser-created folders and moves an owned note with its folderId', async () => {
+    const root = await makeTemporaryDirectory();
+    const initial = await materializeMirror(root, [note()]);
+    const oldPath = initial.manifest.notes[note().id].path;
+    const research = folder();
+
+    const moved = await materializeMirror(
+      root,
+      [note({ folderId: research.id, updatedAt: 300 })],
+      { folders: [research] },
+    );
+    const nextPath = moved.manifest.notes[note().id].path;
+
+    expect(moved.manifest.folders[research.id]).toBe('Research');
+    expect(nextPath).toBe(`Research/${path.posix.basename(oldPath)}`);
+    expect(moved.removedPaths).toEqual([oldPath]);
+    await expect(readFile(path.join(root, oldPath))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(parseMirrorNote(await readFile(path.join(root, nextPath), 'utf8')))
+      .toMatchObject({ id: note().id, folderId: research.id });
+  });
+
+  it('creates empty nested browser folders without touching unowned directory content', async () => {
+    const root = await makeTemporaryDirectory();
+    await mkdir(path.join(root, 'Archive'));
+    await writeFile(path.join(root, 'Archive', 'attachment.png'), 'unowned', 'utf8');
+    const parent = folder({ id: 'archive', name: 'Archive' });
+    const child = folder({ id: 'ideas', name: 'Ideas', parentFolderId: parent.id });
+
+    const result = await materializeMirror(root, [], { folders: [parent, child] });
+
+    expect(result.manifest.folders).toEqual({ archive: 'Archive', ideas: 'Archive/Ideas' });
+    expect(await readdir(path.join(root, 'Archive'))).toEqual(['Ideas', 'attachment.png']);
+    expect(await readdir(path.join(root, 'Archive', 'Ideas'))).toEqual([]);
+
+    const deleted = await materializeMirror(root, [], {
+      folders: [{ ...parent, deleted: true, deletedAt: 400 }, { ...child, deleted: true, deletedAt: 400 }],
+    });
+    expect(deleted.manifest.folders).toEqual({});
+    expect(await readFile(path.join(root, 'Archive', 'attachment.png'), 'utf8')).toBe('unowned');
   });
 
   it('uses collision-safe names and tombstones only manifest-owned files', async () => {
@@ -147,6 +202,139 @@ describe('Markdown materialization', () => {
 });
 
 describe('Markdown scanning', () => {
+  it('turns an empty CLI-created directory into a stable folder entity', async () => {
+    const root = await makeTemporaryDirectory();
+    await mkdir(path.join(root, 'Research'));
+    const researchId = obsidianPathFolderId('notebook-1', 'Research');
+
+    const first = await scanMirror(root, 'notebook-1', { now: () => 500 });
+    expect(first.upsertFolders).toEqual([{
+      id: researchId,
+      notebookId: 'notebook-1',
+      name: 'Research',
+      parentFolderId: null,
+      createdAt: 500,
+      updatedAt: 500,
+      deleted: false,
+      deletedAt: null,
+    }]);
+    expect(first.upserts).toEqual([]);
+
+    await materializeMirror(root, [], {
+      folders: first.upsertFolders,
+      preferredFolderPaths: first.preferredFolderPaths,
+    });
+    const unchanged = await scanMirror(root, 'notebook-1', {
+      knownFolders: first.upsertFolders,
+      now: () => 600,
+    });
+    expect(unchanged.upsertFolders).toEqual([]);
+    expect(unchanged.deletedFolderIds).toEqual([]);
+  });
+
+  it('scopes inferred Obsidian folder IDs to the notebook', async () => {
+    const firstRoot = await makeTemporaryDirectory();
+    const secondRoot = await makeTemporaryDirectory();
+    await mkdir(path.join(firstRoot, 'Research'));
+    await mkdir(path.join(secondRoot, 'Research'));
+
+    const first = await scanMirror(firstRoot, 'notebook:one', { now: () => 500 });
+    const second = await scanMirror(secondRoot, 'notebook:two', { now: () => 500 });
+    const firstId = first.upsertFolders[0]?.id;
+    const secondId = second.upsertFolders[0]?.id;
+
+    expect(firstId).toBe('obsidian:path:notebook%3Aone:Research');
+    expect(secondId).toBe('obsidian:path:notebook%3Atwo:Research');
+    expect(firstId).not.toBe(secondId);
+  });
+
+  it('preserves a legacy path-only folder ID already owned by the manifest', async () => {
+    const root = await makeTemporaryDirectory();
+    const legacy = folder({ id: 'obsidian:path:Research' });
+    await materializeMirror(root, [], { folders: [legacy] });
+
+    const scan = await scanMirror(root, legacy.notebookId, {
+      knownFolders: [legacy],
+      now: () => 500,
+    });
+
+    expect(scan.upsertFolders).toEqual([]);
+    expect(scan.deletedFolderIds).toEqual([]);
+    expect(scan.preferredFolderPaths).toEqual({ [legacy.id]: 'Research' });
+  });
+
+  it('uses the actual parent directory when a managed note moves', async () => {
+    const root = await makeTemporaryDirectory();
+    const left = folder({ id: 'left', name: 'Left' });
+    const right = folder({ id: 'right', name: 'Right' });
+    const managed = note({ folderId: left.id });
+    const initial = await materializeMirror(root, [managed], { folders: [left, right] });
+    const oldPath = initial.manifest.notes[managed.id].path;
+    const movedPath = `Right/${path.posix.basename(oldPath)}`;
+    await rename(path.join(root, oldPath), path.join(root, movedPath));
+
+    const scan = await scanMirror(root, managed.notebookId, {
+      knownFolders: [left, right],
+      now: () => 1_000,
+    });
+
+    expect(scan.deletedNoteIds).toEqual([]);
+    expect(scan.upserts).toEqual([
+      expect.objectContaining({ id: managed.id, folderId: right.id }),
+    ]);
+    expect(scan.preferredPaths).toEqual({ [managed.id]: movedPath });
+  });
+
+  it('preserves nested folder IDs through a directory rename and move', async () => {
+    const root = await makeTemporaryDirectory();
+    const parent = folder({ id: 'parent', name: 'Research' });
+    const child = folder({ id: 'child', name: 'Drafts', parentFolderId: parent.id });
+    const nestedNote = note({ folderId: child.id });
+    const initial = await materializeMirror(root, [nestedNote], { folders: [parent, child] });
+    const originalNotePath = initial.manifest.notes[nestedNote.id].path;
+    await rename(path.join(root, 'Research'), path.join(root, 'Archive'));
+
+    const renamed = await scanMirror(root, nestedNote.notebookId, {
+      knownFolders: [parent, child],
+      now: () => 1_000,
+    });
+    expect(renamed.deletedFolderIds).toEqual([]);
+    expect(renamed.upsertFolders).toEqual([
+      expect.objectContaining({ id: parent.id, name: 'Archive', parentFolderId: null }),
+    ]);
+    expect(renamed.upserts).toEqual([
+      expect.objectContaining({ id: nestedNote.id, folderId: child.id }),
+    ]);
+
+    const renamedParent = { ...parent, name: 'Archive', updatedAt: 1_000 };
+    const renamedNotePath = `Archive/Drafts/${path.posix.basename(originalNotePath)}`;
+    await materializeMirror(root, renamed.upserts, {
+      folders: [renamedParent, child],
+      preferredPaths: renamed.preferredPaths,
+      preferredFolderPaths: renamed.preferredFolderPaths,
+      witnesses: renamed.witnesses,
+    });
+    expect((await readMirrorManifest(root)).folders).toEqual({
+      child: 'Archive/Drafts',
+      parent: 'Archive',
+    });
+    expect(parseMirrorNote(await readFile(path.join(root, renamedNotePath), 'utf8')).folderId)
+      .toBe(child.id);
+
+    await rename(path.join(root, 'Archive', 'Drafts'), path.join(root, 'Drafts'));
+    const moved = await scanMirror(root, nestedNote.notebookId, {
+      knownFolders: [renamedParent, child],
+      now: () => 2_000,
+    });
+    expect(moved.deletedFolderIds).toEqual([]);
+    expect(moved.upsertFolders).toEqual([
+      expect.objectContaining({ id: child.id, name: 'Drafts', parentFolderId: null }),
+    ]);
+    expect(moved.upserts).toEqual([
+      expect.objectContaining({ id: nestedNote.id, folderId: child.id }),
+    ]);
+  });
+
   it('returns external updates and user deletions while suppressing materializer writes', async () => {
     const root = await makeTemporaryDirectory();
     const materialized = await materializeMirror(root, [note()]);
@@ -155,9 +343,13 @@ describe('Markdown scanning', () => {
     expect(await scanMirror(root, 'notebook-1')).toEqual({
       upserts: [],
       deletedNoteIds: [],
+      upsertFolders: [],
+      deletedFolderIds: [],
       ignoredPaths: [],
       preferredPaths: {},
+      preferredFolderPaths: {},
       witnesses: {},
+      folderWitnesses: {},
     });
 
     const edited = note({ content: 'edited outside storm.dance', updatedAt: 250 });
@@ -196,9 +388,13 @@ describe('Markdown scanning', () => {
     expect(await scanMirror(root, 'notebook-1')).toEqual({
       upserts: [],
       deletedNoteIds: [],
+      upsertFolders: [],
+      deletedFolderIds: [],
       ignoredPaths: [],
       preferredPaths: {},
+      preferredFolderPaths: {},
       witnesses: {},
+      folderWitnesses: {},
     });
   });
 
@@ -240,33 +436,44 @@ describe('Markdown scanning', () => {
       createId: () => 'nested-note',
       now: () => 500,
     });
+    const researchId = obsidianPathFolderId('notebook-1', 'Research');
     expect(scan.upserts).toEqual([
       expect.objectContaining({
         id: 'nested-note',
         title: 'Field notes',
-        folderId: 'obsidian:path:Research',
+        folderId: researchId,
         content: '---\ntags: [storm]\n---\nSee [[Other note]] and ![[diagram.png]].\n',
       }),
     ]);
     expect(scan.preferredPaths).toEqual({ 'nested-note': 'Research/Field notes.md' });
+    expect(scan.upsertFolders).toEqual([
+      expect.objectContaining({
+        id: researchId,
+        name: 'Research',
+        parentFolderId: null,
+      }),
+    ]);
 
     const materialized = await materializeMirror(root, scan.upserts, {
+      folders: scan.upsertFolders,
       preferredPaths: scan.preferredPaths,
+      preferredFolderPaths: scan.preferredFolderPaths,
     });
     expect(materialized.manifest.notes['nested-note'].path).toBe('Research/Field notes.md');
-    expect(materialized.manifest.folders['obsidian:path:Research']).toBe('Research');
+    expect(materialized.manifest.folders[researchId]).toBe('Research');
     const canonical = await readFile(path.join(root, 'Research', 'Field notes.md'), 'utf8');
     expect(canonical).toContain(`<!-- stormdance:{"schema":${MIRROR_SCHEMA}`);
     expect(canonical).toContain('tags: [storm]');
     expect(canonical).toContain('[[Other note]]');
     expect(canonical).toContain('![[diagram.png]]');
-    expect(await scanMirror(root, 'notebook-1')).toEqual({
-      upserts: [],
-      deletedNoteIds: [],
-      ignoredPaths: [],
-      preferredPaths: {},
-      witnesses: {},
+    const unchanged = await scanMirror(root, 'notebook-1', {
+      knownFolders: scan.upsertFolders,
     });
+    expect(unchanged.upserts).toEqual([]);
+    expect(unchanged.deletedNoteIds).toEqual([]);
+    expect(unchanged.upsertFolders).toEqual([]);
+    expect(unchanged.deletedFolderIds).toEqual([]);
+    expect(unchanged.ignoredPaths).toEqual([]);
   });
 
   it('recognizes a metadata-preserving user rename without reporting a deletion', async () => {

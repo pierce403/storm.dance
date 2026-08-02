@@ -35,6 +35,7 @@ import {
 } from './protocol';
 import {
   NotebookCrdt,
+  type CrdtFolderInput,
   type CrdtNoteInput,
   type NotebookCrdtProjection,
   type NotebookSeed,
@@ -294,6 +295,14 @@ const baseNote: CrdtNoteInput = {
   updatedAt: 1,
 };
 
+const baseFolder: CrdtFolderInput = {
+  id: 'folder-1',
+  name: 'Research',
+  parentFolderId: null,
+  createdAt: 1,
+  updatedAt: 1,
+};
+
 const collaborator = {
   address: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
   label: 'Bob',
@@ -402,6 +411,65 @@ describe('NotebookCollaborationSession', () => {
 
     await resumed.session.start();
     expect(resumed.session.projection.notes[0]?.content).toBe(baseNote.content);
+
+    await resumed.session.stop();
+    await first.session.stop();
+  });
+
+  it('recovers folders from a legacy persisted state and sends the additive delta', async () => {
+    const legacy = new NotebookCrdt(notebook.id);
+    legacy.seed(notebook, [baseNote]);
+    const initialState = legacy.encodeUpdate();
+    legacy.destroy();
+
+    const network = new FakeXmtpNetwork();
+    const alice = network.createClient(
+      '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'alice-inbox',
+    );
+    const migrated = createSession(alice, {
+      initialState,
+      folders: [baseFolder],
+    });
+
+    expect(migrated.session.projection.folders).toEqual([
+      expect.objectContaining({ id: baseFolder.id, name: baseFolder.name }),
+    ]);
+    await migrated.session.start([collaborator]);
+    await settleMessages(24);
+
+    expect(decodeHistory(network.creations[0].state).map(({ logical }) => logical.kind))
+      .toContain('update');
+    await migrated.session.stop();
+  });
+
+  it('defers local folder recovery until an existing group supplies shared state', async () => {
+    const network = new FakeXmtpNetwork();
+    const alice = network.createClient(
+      '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'alice-inbox',
+    );
+    const bob = network.createClient(collaborator.address, 'bob-inbox');
+    const first = createSession(alice);
+    await first.session.start([collaborator]);
+
+    const resumed = createSession(bob, {
+      conversationId: first.session.topic,
+      initialState: undefined,
+      notes: [],
+      folders: [baseFolder],
+    });
+    expect(resumed.session.projection.folders).toEqual([]);
+
+    await resumed.session.start();
+    await settleMessages(48);
+
+    expect(resumed.session.projection.folders).toEqual([
+      expect.objectContaining({ id: baseFolder.id, name: baseFolder.name }),
+    ]);
+    expect(first.session.projection.folders).toEqual([
+      expect.objectContaining({ id: baseFolder.id, name: baseFolder.name }),
+    ]);
 
     await resumed.session.stop();
     await first.session.stop();
@@ -588,6 +656,62 @@ describe('NotebookCollaborationSession', () => {
     expect(session.projection.notes[0].content).toBe('second local edit');
 
     await session.stop();
+  });
+
+  it('projects live empty-folder creation, rename, note moves, and tombstones', async () => {
+    const network = new FakeXmtpNetwork();
+    const alice = network.createClient(
+      '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'alice-inbox',
+    );
+    const bob = network.createClient(collaborator.address, 'bob-inbox');
+    const first = createSession(alice);
+    await first.session.start([collaborator]);
+    const second = createSession(bob, {
+      notes: [],
+      conversationId: first.session.topic,
+    });
+    await second.session.start();
+    await settleMessages(24);
+
+    first.session.upsertLocalFolder({
+      ...baseFolder,
+      notebookId: notebook.id,
+    });
+    await advance(COLLABORATION_BATCH_MS);
+    expect(second.session.projection.folders).toEqual([
+      expect.objectContaining({ id: baseFolder.id, name: 'Research', deleted: false }),
+    ]);
+
+    first.session.upsertLocalFolder({
+      ...baseFolder,
+      notebookId: notebook.id,
+      name: 'Renamed research',
+      updatedAt: 2,
+    });
+    first.session.upsertLocalNote({
+      ...baseNote,
+      notebookId: notebook.id,
+      folderId: baseFolder.id,
+      updatedAt: 2,
+    });
+    await advance(COLLABORATION_BATCH_MS);
+    expect(second.session.projection.folders[0]).toMatchObject({
+      name: 'Renamed research',
+      deleted: false,
+    });
+    expect(second.session.projection.notes[0]?.folderId).toBe(baseFolder.id);
+
+    first.session.deleteLocalFolder(baseFolder.id, 3);
+    await advance(COLLABORATION_BATCH_MS);
+    expect(second.session.projection.folders[0]).toMatchObject({
+      id: baseFolder.id,
+      deleted: true,
+      deletedAt: 3,
+    });
+
+    await second.session.stop();
+    await first.session.stop();
   });
 
   it('does not publish a local batch until its complete state is durable', async () => {

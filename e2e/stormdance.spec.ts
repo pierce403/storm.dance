@@ -372,7 +372,7 @@ test.describe('storm.dance notes', () => {
     );
   });
 
-  test('supports notebook and folder creation without breaking navigation', async ({ page }) => {
+  test('creates a folder and persists a note dragged into it', async ({ page }) => {
     await openApp(page);
 
     await page.getByRole('button', { name: 'Create new notebook', exact: true }).click();
@@ -391,6 +391,21 @@ test.describe('storm.dance notes', () => {
     await expect(page.getByLabel('Expand Research')).toBeVisible();
     await page.getByLabel('Expand Research').click();
     await expect(page.getByLabel('Collapse Research')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Create new note', exact: true }).click();
+    await page.getByPlaceholder('Note Title').fill('Dragged field note');
+    const note = page.getByRole('treeitem', { name: 'Note Dragged field note' });
+    const folder = page.getByRole('treeitem', { name: 'Folder Research' });
+    await expect(note).toBeVisible();
+    await note.locator('xpath=..').dragTo(folder);
+    await expect(page.getByText('Note moved successfully')).toBeVisible();
+    await expect(folder.locator('xpath=..').getByRole('treeitem', { name: 'Note Dragged field note' })).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'storm.dance' })).toBeVisible();
+    await page.getByLabel('Expand Research').click();
+    const reloadedFolder = page.getByRole('treeitem', { name: 'Folder Research' });
+    await expect(reloadedFolder.locator('xpath=..').getByRole('treeitem', { name: 'Note Dragged field note' })).toBeVisible();
   });
 
   test('opens notebook collaborator settings from notebook info', async ({ page }) => {
