@@ -806,7 +806,7 @@ mod tests {
     fn folder_tombstone_survives_local_seed() -> Result<(), CoreError> {
         let replica = NotebookCrdt::new("notebook-1")?;
         let original = folder("folder-1", "Plans", None);
-        replica.seed_with_folders(&seed("notebook-1"), &[original.clone()], &[])?;
+        replica.seed_with_folders(&seed("notebook-1"), std::slice::from_ref(&original), &[])?;
         replica.delete_folder("folder-1", 20)?;
         replica.seed_with_folders(
             &seed("notebook-1"),
