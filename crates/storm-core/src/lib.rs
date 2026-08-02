@@ -638,9 +638,9 @@ impl NotebookCrdt {
                     "folder map contains an empty ID".to_owned(),
                 ));
             }
-            let folder = value.cast::<MapRef>().map_err(|_| {
-                CoreError::InvalidDocument(format!("folders.{id} must be a Y.Map"))
-            })?;
+            let folder = value
+                .cast::<MapRef>()
+                .map_err(|_| CoreError::InvalidDocument(format!("folders.{id} must be a Y.Map")))?;
             let name = as_text(folder.get(&txn, "name")).ok_or_else(|| {
                 CoreError::InvalidDocument(format!("folders.{id}.name must be a Y.Text"))
             })?;

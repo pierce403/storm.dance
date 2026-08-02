@@ -563,7 +563,9 @@ impl Mirror {
             let relative = match relative_directory_string(&self.root, entry.path()) {
                 Ok(value) => value,
                 Err(error) => {
-                    result.ignored_paths.push(format!("{} ({error})", entry.path().display()));
+                    result
+                        .ignored_paths
+                        .push(format!("{} ({error})", entry.path().display()));
                     continue;
                 }
             };
@@ -617,10 +619,7 @@ impl Mirror {
             };
         }
         for (path, id) in &folder_ids_by_path {
-            let parent_path = Path::new(path)
-                .parent()
-                .map(slash_path)
-                .unwrap_or_default();
+            let parent_path = Path::new(path).parent().map(slash_path).unwrap_or_default();
             let name = Path::new(path)
                 .file_name()
                 .and_then(|value| value.to_str())
@@ -628,14 +627,15 @@ impl Mirror {
                 .to_owned();
             let timestamp = directories.get(path).copied().unwrap_or_else(now_ms);
             let current_folder = current_folders.get(id.as_str()).copied();
-            let (created_at, updated_at) = current_folder.map_or((timestamp, timestamp), |current| {
-                (
-                    current.created_at,
-                    timestamp
-                        .max(now_ms())
-                        .max(current.updated_at.saturating_add(1).min(MAX_SAFE_TIMESTAMP)),
-                )
-            });
+            let (created_at, updated_at) =
+                current_folder.map_or((timestamp, timestamp), |current| {
+                    (
+                        current.created_at,
+                        timestamp
+                            .max(now_ms())
+                            .max(current.updated_at.saturating_add(1).min(MAX_SAFE_TIMESTAMP)),
+                    )
+                });
             let candidate = Folder {
                 id: id.clone(),
                 name,
@@ -648,8 +648,7 @@ impl Mirror {
             let already_projected = current_folder.is_some_and(|current| {
                 !current.deleted
                     && current.name.as_str() == candidate.name.as_str()
-                    && current.parent_folder_id.as_deref()
-                        == candidate.parent_folder_id.as_deref()
+                    && current.parent_folder_id.as_deref() == candidate.parent_folder_id.as_deref()
             });
             if !already_projected {
                 result.folder_witnesses.insert(
@@ -778,8 +777,7 @@ impl Mirror {
         scan.folder_upserts
             .retain(|folder| current.contains(&folder.id));
         scan.deleted_folder_ids.retain(|id| current.contains(id));
-        scan.folder_witnesses
-            .retain(|id, _| current.contains(id));
+        scan.folder_witnesses.retain(|id, _| current.contains(id));
         scan.ignored_paths.sort();
         scan.ignored_paths.dedup();
     }
@@ -822,11 +820,19 @@ impl Mirror {
             .map(|folder| folder.id.clone())
             .collect();
         let desired_folders = projected_folder_paths(snapshot);
+        let mut protected_folder_ids = BTreeSet::new();
         for folder in &snapshot.folders {
             if folder.deleted {
                 manifest.folders.remove(&folder.id);
             } else if let Some(path) = desired_folders.get(&folder.id) {
-                ensure_safe_directory(&self.root, path)?;
+                match ensure_safe_directory(&self.root, path) {
+                    Ok(()) => {}
+                    Err(StorageError::UnsafePath(_)) => {
+                        protected_folder_ids.insert(folder.id.clone());
+                        result.protected_paths.push(path.clone());
+                    }
+                    Err(error) => return Err(error),
+                }
                 manifest.folders.insert(folder.id.clone(), path.clone());
             }
         }
@@ -871,6 +877,16 @@ impl Mirror {
             let source = serialize_note(snapshot, note)?;
             let hash = sha256(source.as_bytes());
             let previous = manifest.notes.get(&note.id).cloned();
+            if note
+                .folder_id
+                .as_ref()
+                .is_some_and(|folder_id| protected_folder_ids.contains(folder_id))
+            {
+                if let Some(previous) = previous {
+                    result.protected_paths.push(previous.path);
+                }
+                continue;
+            }
             let witnessed_preferred = preferred_paths.get(&note.id).filter(|preferred| {
                 witnesses
                     .get(&note.id)
@@ -999,9 +1015,9 @@ impl Mirror {
         let manifest = self.read_manifest()?;
         let (pending_local_changes, ignored_paths) = if let Some(config) = &config {
             let current_projection = match self.read_state()? {
-                Some(update) => Some(
-                    NotebookCrdt::from_update(&config.notebook_id, &update)?.snapshot()?,
-                ),
+                Some(update) => {
+                    Some(NotebookCrdt::from_update(&config.notebook_id, &update)?.snapshot()?)
+                }
                 None => None,
             };
             let scan = self.scan_internal(&config.notebook_id, current_projection.as_ref())?;
@@ -1462,7 +1478,10 @@ fn encode_uri_component(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
     for byte in value.bytes() {
         if byte.is_ascii_alphanumeric()
-            || matches!(byte, b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')')
+            || matches!(
+                byte,
+                b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')'
+            )
         {
             encoded.push(char::from(byte));
         } else {
@@ -2186,8 +2205,7 @@ mod tests {
         let directory = tempdir().map_err(|error| io("temp", error))?;
         let mirror = Mirror::open(directory.path())?;
         mirror.write_link(&config())?;
-        fs::create_dir(directory.path().join("Research"))
-            .map_err(|error| io("Research", error))?;
+        fs::create_dir(directory.path().join("Research")).map_err(|error| io("Research", error))?;
         let replica = NotebookCrdt::new("notebook-1")?;
         replica.seed(&snapshot(Vec::new()).notebook, &[])?;
         mirror.write_state(&replica.encode_state_as_update_v1())?;
@@ -2210,8 +2228,7 @@ mod tests {
         let directory = tempdir().map_err(|error| io("temp", error))?;
         let mirror = Mirror::open(directory.path())?;
         mirror.write_link(&config())?;
-        fs::create_dir(directory.path().join("Research"))
-            .map_err(|error| io("Research", error))?;
+        fs::create_dir(directory.path().join("Research")).map_err(|error| io("Research", error))?;
 
         let first = mirror.scan("notebook:one")?;
         let first_id = &first.folder_upserts[0].id;
@@ -2269,10 +2286,7 @@ mod tests {
         deleted.deleted = true;
         deleted.deleted_at = Some(2);
         let result = mirror.materialize(
-            &snapshot_with_folders(
-                vec![deleted],
-                vec![note("n1", "Design", Some("folder-a"))],
-            ),
+            &snapshot_with_folders(vec![deleted], vec![note("n1", "Design", Some("folder-a"))]),
             2,
         )?;
 
@@ -2295,10 +2309,7 @@ mod tests {
         )?;
         let result = mirror.materialize(
             &snapshot_with_folders(
-                vec![
-                    folder("one", "Other", None),
-                    folder("two", "Shared", None),
-                ],
+                vec![folder("one", "Other", None), folder("two", "Shared", None)],
                 Vec::new(),
             ),
             2,
@@ -2316,11 +2327,9 @@ mod tests {
         let directory = tempdir().map_err(|error| io("temp", error))?;
         let mirror = Mirror::open(directory.path())?;
         mirror.write_link(&config())?;
-        fs::create_dir(directory.path().join("Racing"))
-            .map_err(|error| io("Racing", error))?;
+        fs::create_dir(directory.path().join("Racing")).map_err(|error| io("Racing", error))?;
         let mut created = mirror.scan("notebook-1")?;
-        fs::remove_dir(directory.path().join("Racing"))
-            .map_err(|error| io("Racing", error))?;
+        fs::remove_dir(directory.path().join("Racing")).map_err(|error| io("Racing", error))?;
         mirror.revalidate_folder_witnesses(&mut created);
         assert!(created.folder_upserts.is_empty());
 
@@ -2362,12 +2371,9 @@ mod tests {
             moved_scan.upserts[0].folder_id.as_deref(),
             Some("obsidian:path:notebook-1:B")
         );
-        assert!(moved_scan
-            .folder_upserts
-            .iter()
-            .any(|candidate| {
-                candidate.id == "obsidian:path:notebook-1:B" && candidate.name == "B"
-            }));
+        assert!(moved_scan.folder_upserts.iter().any(|candidate| {
+            candidate.id == "obsidian:path:notebook-1:B" && candidate.name == "B"
+        }));
 
         fs::remove_dir(directory.path().join("A")).map_err(|error| io("A", error))?;
         fs::rename(directory.path().join("B"), directory.path().join("Renamed"))
