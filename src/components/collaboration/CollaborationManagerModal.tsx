@@ -1,10 +1,15 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MessageCircle, X, ShieldCheck, Loader2 } from 'lucide-react';
-import { CollaborationContact } from '@/lib/collaboration/types';
+import type {
+    CollaborationContact,
+    CollaborationRole,
+    NotebookCollaborator,
+} from '@/lib/collaboration/types';
 import { CollaborationStatus } from '@/hooks/useNotebookCollaboration';
+import { CollaboratorSettings } from './CollaboratorSettings';
 
 interface CollaborationManagerModalProps {
     isOpen: boolean;
@@ -20,6 +25,14 @@ interface CollaborationManagerModalProps {
     onStartCollaboration: () => Promise<void>;
     onStopCollaboration: () => Promise<void>;
     xmtpEnv: 'dev' | 'production';
+    liveCollaborators?: NotebookCollaborator[];
+    collaboratorsLoading?: boolean;
+    collaboratorsPending?: boolean;
+    collaboratorsError?: string | null;
+    onAddLive?: (value: string, role: CollaborationRole) => Promise<void>;
+    onChangeRole?: (inboxId: string, role: CollaborationRole) => Promise<void>;
+    onRemoveLive?: (inboxId: string) => Promise<void>;
+    onRefresh?: () => Promise<void>;
 }
 
 export function CollaborationManagerModal({
@@ -36,6 +49,14 @@ export function CollaborationManagerModal({
     onStartCollaboration,
     onStopCollaboration,
     xmtpEnv,
+    liveCollaborators,
+    collaboratorsLoading,
+    collaboratorsPending,
+    collaboratorsError,
+    onAddLive,
+    onChangeRole,
+    onRemoveLive,
+    onRefresh,
 }: CollaborationManagerModalProps) {
     const [contactInput, setContactInput] = useState('');
     const [pendingAdd, setPendingAdd] = useState(false);
@@ -46,6 +67,8 @@ export function CollaborationManagerModal({
         try {
             await onAddContact(contactInput);
             setContactInput('');
+        } catch {
+            // The collaboration hook exposes the actionable error in `error`.
         } finally {
             setPendingAdd(false);
         }
@@ -53,14 +76,27 @@ export function CollaborationManagerModal({
 
     const collaborating = status === 'active';
     const isStarting = status === 'starting';
+    const hasLiveControls = Boolean(
+        sessionTopic
+        && liveCollaborators
+        && onAddLive
+        && onChangeRole
+        && onRemoveLive
+        && onRefresh,
+    );
+
+    useEffect(() => {
+        if (!isOpen || !hasLiveControls || !onRefresh) return;
+        void onRefresh().catch(() => undefined);
+    }, [hasLiveControls, isOpen, onRefresh, sessionTopic]);
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
             <DialogContent className="sm:max-w-[425px]">
                 <DialogHeader>
-                    <DialogTitle>Collaborate on "{notebookName || 'Untitled'}"</DialogTitle>
+                    <DialogTitle>Collaborators for "{notebookName || 'Untitled'}"</DialogTitle>
                     <DialogDescription>
-                        Invite others to edit this notebook with you in real-time via XMTP.
+                        Invite people by ENS name or Ethereum address and manage their native XMTP group roles.
                     </DialogDescription>
                 </DialogHeader>
 
@@ -74,52 +110,69 @@ export function CollaborationManagerModal({
                         </div>
                     </div>
 
-                    {/* Add Collaborator Input */}
-                    <div className="space-y-2">
-                        <div className="flex space-x-2">
-                            <Input
-                                value={contactInput}
-                                onChange={(e) => setContactInput(e.target.value)}
-                                placeholder="Add ENS or address"
-                                className="h-9"
-                                disabled={!isXmtpConnected || collaborating}
-                            />
-                            <Button size="sm" onClick={handleAdd} disabled={!isXmtpConnected || pendingAdd || collaborating}>
-                                {pendingAdd ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add'}
-                            </Button>
-                        </div>
-                        {!isXmtpConnected && (
-                            <p className="text-xs text-amber-600 dark:text-amber-400">Connect to XMTP to invite collaborators.</p>
-                        )}
-                        {error && <p className="text-xs text-red-500">{error}</p>}
-                    </div>
-
-                    {/* Contact List */}
-                    <div className="space-y-1 max-h-[200px] overflow-y-auto pr-1 border rounded-md p-2">
-                        {contacts.length === 0 && (
-                            <p className="text-xs text-muted-foreground text-center py-2">No collaborators added yet.</p>
-                        )}
-                        {contacts.map((contact) => (
-                            <div
-                                key={contact.address}
-                                className="flex items-center justify-between text-xs bg-muted/50 rounded-md px-2 py-1"
-                            >
-                                <div>
-                                    <p className="font-mono text-[11px]">{contact.address}</p>
-                                    {contact.ensName && <p className="text-[11px] text-muted-foreground">{contact.ensName}</p>}
+                    {hasLiveControls ? (
+                        <CollaboratorSettings
+                            collaborators={liveCollaborators!}
+                            loading={collaboratorsLoading}
+                            pending={collaboratorsPending}
+                            error={collaboratorsError}
+                            onAdd={onAddLive!}
+                            onChangeRole={onChangeRole!}
+                            onRemove={onRemoveLive!}
+                            onRefresh={onRefresh!}
+                        />
+                    ) : (
+                        <>
+                            {/* Stage initial members before creating the XMTP group. */}
+                            <div className="space-y-2">
+                                <div className="flex space-x-2">
+                                    <Input
+                                        value={contactInput}
+                                        onChange={(e) => setContactInput(e.target.value)}
+                                        placeholder="Add ENS or address"
+                                        aria-label="ENS name or Ethereum address"
+                                        className="h-9"
+                                        disabled={!isXmtpConnected || collaborating || isStarting}
+                                    />
+                                    <Button size="sm" onClick={handleAdd} disabled={!isXmtpConnected || pendingAdd || collaborating || isStarting}>
+                                        {pendingAdd ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add'}
+                                    </Button>
                                 </div>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6 hover:text-destructive"
-                                    onClick={() => onRemoveContact(contact.address)}
-                                    disabled={collaborating}
-                                >
-                                    <X className="h-3 w-3" />
-                                </Button>
+                                {!isXmtpConnected && (
+                                    <p className="text-xs text-amber-600 dark:text-amber-400">Connect to XMTP to invite collaborators.</p>
+                                )}
+                                {error && <p role="alert" className="text-xs text-red-500">{error}</p>}
                             </div>
-                        ))}
-                    </div>
+
+                            {/* Initial member list */}
+                            <div className="space-y-1 max-h-[200px] overflow-y-auto pr-1 border rounded-md p-2">
+                                {contacts.length === 0 && (
+                                    <p className="text-xs text-muted-foreground text-center py-2">No collaborators added yet.</p>
+                                )}
+                                {contacts.map((contact) => (
+                                    <div
+                                        key={contact.address}
+                                        className="flex items-center justify-between text-xs bg-muted/50 rounded-md px-2 py-1"
+                                    >
+                                        <div>
+                                            <p className="font-mono text-[11px]">{contact.address}</p>
+                                            {contact.ensName && <p className="text-[11px] text-muted-foreground">{contact.ensName}</p>}
+                                        </div>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-6 w-6 hover:text-destructive"
+                                            aria-label={`Remove ${contact.ensName ?? contact.address}`}
+                                            onClick={() => onRemoveContact(contact.address)}
+                                            disabled={collaborating}
+                                        >
+                                            <X className="h-3 w-3" />
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
+                        </>
+                    )}
 
                     {/* Session Info */}
                     {collaborating && sessionTopic && (
@@ -134,12 +187,16 @@ export function CollaborationManagerModal({
 
                 <DialogFooter className="sm:justify-between">
                     {collaborating ? (
-                        <Button variant="destructive" onClick={onStopCollaboration} className="w-full sm:w-auto">
-                            Stop Collaboration
+                        <Button
+                            variant="destructive"
+                            onClick={() => void onStopCollaboration().catch(() => undefined)}
+                            className="w-full sm:w-auto"
+                        >
+                            Stop syncing on this device
                         </Button>
                     ) : (
                         <Button
-                            onClick={onStartCollaboration}
+                            onClick={() => void onStartCollaboration().catch(() => undefined)}
                             disabled={!isXmtpConnected || contacts.length === 0 || isStarting}
                             className="w-full sm:w-auto ml-auto"
                         >

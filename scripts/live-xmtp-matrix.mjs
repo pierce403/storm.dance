@@ -11,6 +11,7 @@ import {
   Group,
   GroupPermissionsOptions,
   IdentifierKind,
+  PermissionLevel,
   SortDirection,
 } from '@xmtp/node-sdk';
 import { Wallet, getBytes } from 'ethers';
@@ -76,6 +77,19 @@ const toNodeIdentifier = (identifier) => ({
     : IdentifierKind.Ethereum,
 });
 
+const toSharedGroupMember = (member) => ({
+  inboxId: member.inboxId,
+  accountIdentifiers: member.accountIdentifiers.map((identifier) => ({
+    identifier: identifier.identifier,
+    identifierKind: identifier.identifierKind === IdentifierKind.Passkey
+      ? 'Passkey'
+      : 'Ethereum',
+  })),
+  installationIds: [...member.installationIds],
+  permissionLevel: member.permissionLevel,
+  consentState: member.consentState,
+});
+
 const toSharedMessage = (message) => ({
   id: message.id,
   content: message.content,
@@ -119,6 +133,16 @@ function adaptNodeGroupForSharedSession(group) {
     addMembersByIdentifiers(identifiers) {
       return group.addMembersByIdentifiers(identifiers.map(toNodeIdentifier));
     },
+    async members() {
+      return (await group.members()).map(toSharedGroupMember);
+    },
+    listAdmins: async () => group.listAdmins(),
+    listSuperAdmins: async () => group.listSuperAdmins(),
+    removeMembers: (inboxIds) => group.removeMembers(inboxIds),
+    addAdmin: (inboxId) => group.addAdmin(inboxId),
+    removeAdmin: (inboxId) => group.removeAdmin(inboxId),
+    addSuperAdmin: (inboxId) => group.addSuperAdmin(inboxId),
+    removeSuperAdmin: (inboxId) => group.removeSuperAdmin(inboxId),
   };
 }
 
@@ -127,6 +151,9 @@ function adaptNodeClientForSharedSession(client) {
     inboxId: client.inboxId,
     address: client.accountIdentifier?.identifier,
     canMessage: (identifiers) => client.canMessage(identifiers.map(toNodeIdentifier)),
+    async findInboxIdByIdentifier(identifier) {
+      return (await client.fetchInboxIdByIdentifier(toNodeIdentifier(identifier))) ?? undefined;
+    },
     conversations: {
       async newGroupWithIdentifiers(identifiers, options = {}) {
         const group = await client.conversations.createGroupWithIdentifiers(
@@ -151,7 +178,7 @@ function adaptNodeClientForSharedSession(client) {
 
 /**
  * The collaboration session imports browser-sdk enums at runtime in the web
- * bundle. Vite loads the exact source module here and supplies only those three
+ * bundle. Vite loads the exact source modules here and supplies only their
  * numeric enums, avoiding a fake collaboration implementation while running
  * the browser/Tauri webview engine in Node CI.
  */
@@ -177,6 +204,7 @@ async function loadSharedCollaborationSession() {
         return [
           'export const ConsentState = { Unknown: 0, Allowed: 1, Denied: 2 };',
           'export const GroupPermissionsOptions = { Default: 0, AdminOnly: 1, CustomPolicy: 2 };',
+          'export const PermissionLevel = { Member: 0, Admin: 1, SuperAdmin: 2 };',
           'export const SortDirection = { Ascending: 0, Descending: 1 };',
         ].join('\n');
       },
@@ -184,10 +212,14 @@ async function loadSharedCollaborationSession() {
   });
 
   try {
-    const module = await server.ssrLoadModule(
-      '/src/lib/collaboration/notebookCollaboration.ts',
-    );
-    return module.NotebookCollaborationSession;
+    const [sessionModule, collaboratorModule] = await Promise.all([
+      server.ssrLoadModule('/src/lib/collaboration/notebookCollaboration.ts'),
+      server.ssrLoadModule('/src/lib/collaboration/collaborators.ts'),
+    ]);
+    return {
+      NotebookCollaborationSession: sessionModule.NotebookCollaborationSession,
+      NotebookCollaboratorManager: collaboratorModule.NotebookCollaboratorManager,
+    };
   } finally {
     await server.close();
   }
@@ -220,11 +252,19 @@ async function run() {
   const startedAt = Date.now();
 
   try {
-    const NotebookCollaborationSession = await loadSharedCollaborationSession();
+    const {
+      NotebookCollaborationSession,
+      NotebookCollaboratorManager,
+    } = await loadSharedCollaborationSession();
     assert.equal(
       typeof NotebookCollaborationSession,
       'function',
       'The shared web/Tauri collaboration session must load',
+    );
+    assert.equal(
+      typeof NotebookCollaboratorManager,
+      'function',
+      'The shipped notebook collaborator manager must load',
     );
 
     const web = await openClient(root, 'web');
@@ -322,6 +362,82 @@ async function run() {
         );
     });
 
+    // Add a fourth, independently persisted XMTP identity only after the
+    // notebook group and all three primary component sessions are live. This
+    // covers the settings-style contributor lifecycle instead of relying only
+    // on the members supplied when the group is created.
+    const contributor = await openClient(root, 'dynamic-contributor');
+    clients.push(contributor.client);
+    const contributorAddress = await contributor.wallet.getAddress();
+    await retry('dynamic contributor becomes messageable', async () => {
+      const reachable = await web.client.canMessage([{
+        identifier: contributorAddress,
+        identifierKind: IdentifierKind.Ethereum,
+      }]);
+      return Array.from(reachable.values()).some(Boolean);
+    });
+
+    const webGroup = await findGroup(web.client, conversationId);
+    assert.ok(webGroup, 'The group creator must still have the notebook group');
+    const collaboratorManager = new NotebookCollaboratorManager({
+      client: adaptNodeClientForSharedSession(web.client),
+      group: adaptNodeGroupForSharedSession(webGroup),
+    });
+    const addedContributor = await collaboratorManager.add(contributorAddress);
+    assert.equal(
+      addedContributor.collaborator.inboxId,
+      contributor.client.inboxId,
+      'The shipped collaborator manager must bind the address to its canonical XMTP inbox',
+    );
+    assert.equal(
+      addedContributor.collaborator.role,
+      'member',
+      'The shipped collaborator manager must expose the new inbox as Member',
+    );
+
+    const contributorMember = await retry('dynamic contributor is added as a member', async () => {
+      await webGroup.sync();
+      const member = (await webGroup.members()).find(
+        (candidate) => candidate.inboxId === contributor.client.inboxId,
+      );
+      return member?.permissionLevel === PermissionLevel.Member ? member : undefined;
+    });
+    assert.equal(contributorMember.permissionLevel, PermissionLevel.Member);
+
+    const contributorGroup = await retry(
+      'dynamic contributor group welcome',
+      () => findGroup(contributor.client, conversationId),
+    );
+    const contributorSession = new NotebookCollaborationSession({
+      notebook,
+      notes: [],
+      client: adaptNodeClientForSharedSession(contributor.client),
+      conversationId,
+      onRemoteProjection: () => undefined,
+      onStateChange: () => undefined,
+    });
+    sessions.push(contributorSession);
+    await contributorSession.start();
+
+    await retry('dynamic contributor catches up through the shared session', () => (
+      contributorSession.projection.notes.some(
+        (note) => note.id === noteId && note.content === initialNote.content,
+      )
+    ));
+
+    await collaboratorManager.setRole(contributor.client.inboxId, 'admin');
+    await retry('dynamic contributor promotion reaches the XMTP group', async () => {
+      await Promise.all([webGroup.sync(), contributorGroup.sync()]);
+      const ownerView = (await webGroup.members()).find(
+        (member) => member.inboxId === contributor.client.inboxId,
+      );
+      const contributorView = (await contributorGroup.members()).find(
+        (member) => member.inboxId === contributor.client.inboxId,
+      );
+      return ownerView?.permissionLevel === PermissionLevel.Admin
+        && contributorView?.permissionLevel === PermissionLevel.Admin;
+    });
+
     // Exercise the actual filesystem-facing CLI path and the packaged Tauri
     // webview session concurrently from the same base CRDT state.
     const materialized = await readMarkdownNote(vault, noteId);
@@ -350,6 +466,7 @@ async function run() {
         webSession.projection,
         cliSession.projection,
         tauriSession.projection,
+        contributorSession.projection,
       ];
       const content = projections[0].notes.find((note) => note.id === noteId)?.content ?? '';
       return content.includes('from cli')
@@ -357,6 +474,32 @@ async function run() {
         && projections.every(
           (projection) => projectionKey(projection) === projectionKey(projections[0]),
         );
+    });
+
+    const contributorNote = contributorSession.projection.notes.find(
+      (note) => note.id === noteId,
+    );
+    assert.ok(contributorNote, 'The dynamic contributor must receive the shared note');
+    contributorSession.upsertLocalNote({
+      ...contributorNote,
+      notebookId,
+      content: `${contributorNote.content}\nfrom dynamic contributor`,
+      updatedAt: startedAt + 3,
+    });
+
+    await retry('dynamic contributor edit converges in every component', () => {
+      const projections = [
+        webSession.projection,
+        cliSession.projection,
+        tauriSession.projection,
+        contributorSession.projection,
+      ];
+      const expected = projectionKey(projections[0]);
+      const convergedContent = projections[0].notes.find(
+        (note) => note.id === noteId,
+      )?.content ?? '';
+      return convergedContent.includes('from dynamic contributor')
+        && projections.every((projection) => projectionKey(projection) === expected);
     });
 
     // Send a subsequent edit in the other direction and require the CLI's
@@ -367,14 +510,18 @@ async function run() {
       ...webNote,
       notebookId,
       title: 'Renamed by web',
-      updatedAt: startedAt + 3,
+      updatedAt: startedAt + 4,
     });
 
     const finalMarkdown = await retry('web edit reaches Tauri and CLI Markdown', async () => {
       const markdown = await readMarkdownNote(vault, noteId);
       const tauriNote = tauriSession.projection.notes.find((note) => note.id === noteId);
+      const contributorNoteAfterRename = contributorSession.projection.notes.find(
+        (note) => note.id === noteId,
+      );
       return markdown?.note.title === 'Renamed by web'
         && tauriNote?.title === 'Renamed by web'
+        && contributorNoteAfterRename?.title === 'Renamed by web'
         ? markdown
         : undefined;
     });
@@ -383,6 +530,7 @@ async function run() {
       webSession.projection,
       cliSession.projection,
       tauriSession.projection,
+      contributorSession.projection,
     ];
     assert.ok(
       projections.every(
@@ -393,6 +541,36 @@ async function run() {
     const content = projections[0].notes.find((note) => note.id === noteId)?.content ?? '';
     assert.match(content, /from cli/);
     assert.match(content, /from tauri/);
+    assert.match(content, /from dynamic contributor/);
+
+    await collaboratorManager.setRole(contributor.client.inboxId, 'member');
+    await retry('dynamic contributor demotion reaches the XMTP group', async () => {
+      await Promise.all([webGroup.sync(), contributorGroup.sync()]);
+      const ownerView = (await webGroup.members()).find(
+        (member) => member.inboxId === contributor.client.inboxId,
+      );
+      const contributorView = (await contributorGroup.members()).find(
+        (member) => member.inboxId === contributor.client.inboxId,
+      );
+      return ownerView?.permissionLevel === PermissionLevel.Member
+        && contributorView?.permissionLevel === PermissionLevel.Member;
+    });
+
+    const removedContributorState = await collaboratorManager.remove(
+      contributor.client.inboxId,
+    );
+    assert.ok(
+      !removedContributorState.collaborators.some(
+        (member) => member.inboxId === contributor.client.inboxId,
+      ),
+      'The shipped collaborator manager must remove its local contributor row',
+    );
+    await retry('dynamic contributor is removed from the XMTP group', async () => {
+      await webGroup.sync();
+      return !(await webGroup.members()).some(
+        (member) => member.inboxId === contributor.client.inboxId,
+      );
+    });
 
     console.log(JSON.stringify({
       ok: true,
@@ -423,6 +601,13 @@ async function run() {
           inboxId: tauri.client.inboxId,
           installationId: tauri.client.installationId,
           address: tauriAddress,
+        },
+        {
+          role: 'dynamic-contributor',
+          inboxId: contributor.client.inboxId,
+          installationId: contributor.client.installationId,
+          address: contributorAddress,
+          membershipLifecycle: ['member', 'admin', 'member', 'removed'],
         },
       ],
       filesystem: {

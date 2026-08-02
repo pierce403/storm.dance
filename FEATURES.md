@@ -125,6 +125,10 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
 - **Properties**:
   - Collaborators can be added by ENS name or Ethereum address.
   - Reachability is verified through XMTP before contacts are used for collaboration.
+  - Notebook settings project the current collaborator list directly from XMTP inbox membership; role and removal mutations use inbox IDs so multi-address and multi-installation identities remain coherent.
+  - Collaborator authorization uses XMTP's native `Member`, `Admin`, and `SuperAdmin` roles rather than duplicating access control in notebook metadata. Admins can manage members, while super admins can also manage roles.
+  - The current installation cannot change or remove its own role from notebook settings, and the final super admin cannot be demoted or removed.
+  - Removing a collaborator revokes access to future MLS updates but cannot erase notebook content that installation already downloaded; the UI states this boundary explicitly.
   - One XMTP MLS group in one XMTP environment represents a collaborative notebook; cross-environment rebinding is rejected and the real conversation ID is persisted locally.
   - Group descriptions bind a conversation to a URI-encoded notebook ID; unrelated groups are ignored.
   - New groups use XMTP admin-only permissions and membership is added by Ethereum identifier.
@@ -141,11 +145,13 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
   - Stopping collaboration tears down active streams and clears session state.
 - **Test Criteria**:
   - [x] Vitest covers ENS/address resolution.
+  - [x] Vitest covers native collaborator refresh, reachability, duplicate detection, add/remove by inbox, role promotion/demotion, serialized mutations, self-protection, and final-super-admin protection.
+  - [x] Component tests cover role-based collaborator controls and identity display without a live XMTP network.
   - [x] Vitest covers concurrent Yjs edits, offline state-vector repair, duplicate/out-of-order updates, and deletion tombstones.
   - [x] Vitest covers group creation, 250 ms batching, history/live delivery, same-inbox installations, and stream cleanup.
   - [x] A deterministic two-client transport test proves both replicas converge after concurrent edits.
   - [ ] Browser tests cover invite acceptance/rejection without live XMTP network calls.
-  - [x] CI on relevant `main` changes exercises the shared web/Tauri session and directory CLI code paths through three independent XMTP dev-network identities, installations, and databases.
+  - [x] CI on relevant `main` changes exercises shared web/Tauri sessions, the directory CLI, and a dynamically added collaborator through four independent XMTP dev-network identities, installations, and databases, including native role promotion/demotion and removal.
 
 ### Command-Line Markdown Sync
 - **Stability**: in-progress

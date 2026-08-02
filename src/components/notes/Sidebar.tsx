@@ -4,7 +4,11 @@ import { Note, Notebook, Folder, dbService } from '../../lib/db';
 import { encryptBackup } from '../../lib/cryptoUtils';
 import { saveAs } from 'file-saver';
 import { CollaborationManagerModal } from '@/components/collaboration/CollaborationManagerModal';
-import { CollaborationContact } from '@/lib/collaboration/types';
+import type {
+  CollaborationContact,
+  CollaborationRole,
+  NotebookCollaborator,
+} from '@/lib/collaboration/types';
 import { CollaborationStatus } from '@/hooks/useNotebookCollaboration';
 import { CreateNotebookModal } from './CreateNotebookModal';
 
@@ -38,13 +42,22 @@ interface SidebarProps {
 
   // Collaboration
   collaborationContacts: CollaborationContact[];
+  collaborationContactsNotebookId: string | null;
+  collaborationNotebookId: string | null;
+  notebookCollaborators: NotebookCollaborator[];
+  collaboratorsPending: boolean;
   collaborationStatus: CollaborationStatus;
   collaborationTopic: string | null;
   collaborationError?: string | null;
+  collaboratorsError?: string | null;
   xmtpEnv: 'dev' | 'production';
   isXmtpConnected: boolean;
-  onAddCollaborator: (value: string) => Promise<void>;
-  onRemoveCollaborator: (address: string) => void;
+  onAddCollaborator: (value: string, notebookId: string) => Promise<void>;
+  onRemoveCollaborator: (address: string, notebookId: string) => void;
+  onRefreshCollaborators: () => Promise<void>;
+  onAddNotebookCollaborator: (value: string, role: CollaborationRole) => Promise<void>;
+  onChangeNotebookCollaboratorRole: (inboxId: string, role: CollaborationRole) => Promise<void>;
+  onRemoveNotebookCollaborator: (inboxId: string) => Promise<void>;
   onStartCollaborating: (notebookId: string | null, notebookName: string) => Promise<void>;
   onStopCollaborating: () => Promise<void>;
 }
@@ -74,13 +87,22 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
     containerRef,
     editorTitleInputRef,
     collaborationContacts,
+    collaborationContactsNotebookId,
+    collaborationNotebookId,
+    notebookCollaborators,
+    collaboratorsPending,
     collaborationStatus,
     collaborationTopic,
     collaborationError,
+    collaboratorsError,
     xmtpEnv,
     isXmtpConnected,
     onAddCollaborator,
     onRemoveCollaborator,
+    onRefreshCollaborators,
+    onAddNotebookCollaborator,
+    onChangeNotebookCollaboratorRole,
+    onRemoveNotebookCollaborator,
     onStartCollaborating,
     onStopCollaborating
   }, ref) => {
@@ -99,6 +121,14 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
   const [isCreateNotebookModalOpen, setIsCreateNotebookModalOpen] = useState(false);
   const [renamingNotebookId, setRenamingNotebookId] = useState<string | null>(null);
   const [notebookNewName, setNotebookNewName] = useState('');
+  const collaborationMatchesSelectedNotebook = Boolean(
+    selectedNotebookId
+    && collaborationNotebookId === selectedNotebookId
+    && collaborationStatus === 'active',
+  );
+  const stagedContacts = collaborationContactsNotebookId === selectedNotebookId
+    ? collaborationContacts
+    : [];
 
   // Refs for focusable elements (folders and notes)
   const itemRefs = useRef<Map<string, HTMLElement>>(new Map());
@@ -876,6 +906,11 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
         notebook={infoModalNotebook}
         onClose={() => setInfoModalNotebook(null)}
         onDelete={onDeleteNotebook}
+        onManageCollaborators={(notebookId) => {
+          onSelectNotebook(notebookId);
+          setInfoModalNotebook(null);
+          setIsCollaborationModalOpen(true);
+        }}
       />
 
       <CreateNotebookModal
@@ -888,16 +923,26 @@ export const Sidebar = forwardRef<SidebarHandle, SidebarProps>((
         isOpen={isCollaborationModalOpen}
         onClose={() => setIsCollaborationModalOpen(false)}
         notebookName={selectedNotebook?.name}
-        contacts={collaborationContacts}
-        sessionTopic={collaborationTopic}
-        status={collaborationStatus}
+        contacts={stagedContacts}
+        sessionTopic={collaborationMatchesSelectedNotebook ? collaborationTopic : null}
+        status={collaborationStatus === 'active' && !collaborationMatchesSelectedNotebook
+          ? 'starting'
+          : collaborationStatus}
         error={collaborationError}
         isXmtpConnected={isXmtpConnected}
-        onAddContact={onAddCollaborator}
-        onRemoveContact={onRemoveCollaborator}
+        onAddContact={(value) => onAddCollaborator(value, selectedNotebookId ?? '')}
+        onRemoveContact={(address) => onRemoveCollaborator(address, selectedNotebookId ?? '')}
         onStartCollaboration={() => onStartCollaborating(selectedNotebookId, selectedNotebook?.name || 'Untitled Notebook')}
         onStopCollaboration={onStopCollaborating}
         xmtpEnv={xmtpEnv}
+        liveCollaborators={collaborationMatchesSelectedNotebook ? notebookCollaborators : []}
+        collaboratorsLoading={collaboratorsPending && notebookCollaborators.length === 0}
+        collaboratorsPending={collaboratorsPending}
+        collaboratorsError={collaboratorsError}
+        onAddLive={onAddNotebookCollaborator}
+        onChangeRole={onChangeNotebookCollaboratorRole}
+        onRemoveLive={onRemoveNotebookCollaborator}
+        onRefresh={onRefreshCollaborators}
       />
 
     </div>
@@ -954,7 +999,8 @@ const NotebookInfoModal: React.FC<{
   notebook: Notebook | null;
   onClose: () => void;
   onDelete: (notebookId: string | null) => void;
-}> = ({ notebook, onClose, onDelete }) => {
+  onManageCollaborators: (notebookId: string) => void;
+}> = ({ notebook, onClose, onDelete, onManageCollaborators }) => {
   const [isExporting, setIsExporting] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
 
@@ -1051,7 +1097,14 @@ const NotebookInfoModal: React.FC<{
           <p><strong className="text-gray-600 dark:text-gray-400">Created:</strong> <span className="text-gray-800 dark:text-gray-200">{new Date(notebook.createdAt).toLocaleString()}</span></p>
           <p><strong className="text-gray-600 dark:text-gray-400">Updated:</strong> <span className="text-gray-800 dark:text-gray-200">{new Date(notebook.updatedAt).toLocaleString()}</span></p>
         </div>
-        <div className="mt-4 flex justify-between items-center">
+        <button
+          type="button"
+          onClick={() => onManageCollaborators(notebook.id)}
+          className="mt-4 flex w-full items-center justify-center rounded bg-gray-900 px-4 py-2 text-sm text-white hover:bg-gray-800 dark:bg-yellow-400 dark:text-black dark:hover:bg-yellow-500"
+        >
+          <Users size={14} className="mr-1" /> Manage collaborators
+        </button>
+        <div className="mt-3 flex justify-between items-center">
           <div className="flex space-x-2">
             {/* Export Button */}
             <button

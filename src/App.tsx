@@ -375,12 +375,20 @@ function App() {
 
   const {
     contacts: collaborationContacts,
+    contactsNotebookId: collaborationContactsNotebookId,
+    collaborators: notebookCollaborators,
+    collaboratorsPending,
     status: collaborationStatus,
     sessionNotebookId,
     sessionTopic,
     error: collaborationError,
+    collaboratorsError,
     addContact,
     removeContact,
+    refreshCollaborators,
+    addNotebookCollaborator,
+    changeNotebookCollaboratorRole,
+    removeNotebookCollaborator,
     startCollaboration,
     resumeCollaboration,
     stopCollaboration,
@@ -1395,13 +1403,22 @@ function App() {
               containerRef={notesColumnRef}
               editorTitleInputRef={editorTitleInputRef}
               collaborationContacts={collaborationContacts}
+              collaborationContactsNotebookId={collaborationContactsNotebookId}
+              collaborationNotebookId={sessionNotebookId}
+              notebookCollaborators={notebookCollaborators}
+              collaboratorsPending={collaboratorsPending}
               collaborationStatus={collaborationStatus}
               collaborationTopic={sessionTopic}
               collaborationError={collaborationError || undefined}
+              collaboratorsError={collaboratorsError || undefined}
               xmtpEnv={xmtpNetworkEnv}
               isXmtpConnected={xmtpStatus === 'connected'}
               onAddCollaborator={addContact}
               onRemoveCollaborator={removeContact}
+              onRefreshCollaborators={refreshCollaborators}
+              onAddNotebookCollaborator={addNotebookCollaborator}
+              onChangeNotebookCollaboratorRole={changeNotebookCollaboratorRole}
+              onRemoveNotebookCollaborator={removeNotebookCollaborator}
               onStartCollaborating={(notebookId, notebookName) => startCollaboration(notebookId || '', notebookName)}
               onStopCollaborating={stopCollaboration}
             />

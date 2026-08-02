@@ -392,6 +392,24 @@ test.describe('storm.dance notes', () => {
     await page.getByLabel('Expand Research').click();
     await expect(page.getByLabel('Collapse Research')).toBeVisible();
   });
+
+  test('opens notebook collaborator settings from notebook info', async ({ page }) => {
+    await openApp(page);
+
+    const notebook = page.getByRole('option', { name: /Notebook My Notebook, selected/ });
+    await notebook.hover();
+    await page.getByLabel('Show info for notebook My Notebook').click();
+
+    await expect(page.getByRole('heading', { name: 'Notebook Info: My Notebook' })).toBeVisible();
+    await page.getByRole('button', { name: 'Manage collaborators' }).click();
+
+    const dialog = page.getByRole('dialog', { name: 'Collaborators for "My Notebook"' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('native XMTP group roles');
+    await expect(dialog).toContainText('Connect to XMTP to invite collaborators.');
+    await expect(dialog.getByRole('textbox', { name: 'ENS name or Ethereum address' })).toBeDisabled();
+    await expect(dialog.getByRole('button', { name: 'Start Session' })).toBeDisabled();
+  });
 });
 
 test.describe('storm.dance UX smoke checks', () => {

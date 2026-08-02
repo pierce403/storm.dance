@@ -83,6 +83,7 @@ When working on this project, update this file whenever you learn something dura
     - Use `client.conversations.newDmWithIdentifier(identifier)` for DMs.
     - `identifier` should be `{ identifierKind: 'Ethereum', identifier: address }`.
     - Collaborative notebooks use one MLS group in one XMTP environment, created with `newGroupWithIdentifiers`, not DM fan-out. Cross-environment rebinding is rejected because IndexedDB note projections are shared.
+    - Browser SDK 5.0.1 collaborator state is inbox-scoped: resolve an account with `client.findInboxIdByIdentifier`, then call `group.sync()`, `members()`, `listAdmins()`, and `listSuperAdmins()`. Add by account with `addMembersByIdentifiers`, but deduplicate and mutate roles/removal by inbox ID using `addAdmin`, `removeAdmin`, `addSuperAdmin`, `removeSuperAdmin`, and `removeMembers`.
     - `Notebook.xmtpTopic` is a legacy field name that now stores the real XMTP group/conversation ID.
     - Bind groups to notebooks with the description prefix `storm.dance/yjs/1/` plus the URI-encoded notebook ID.
     - Browser SDK v5 streams take an options object such as `{ onValue, onError, onFail }` and return an async stream whose `end()` must be called. The old callback-first stream API is not compatible.

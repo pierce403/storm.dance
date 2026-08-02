@@ -18,11 +18,20 @@ import {
   type XmtpGroupLike,
 } from '@/lib/collaboration/notebookCollaboration';
 import {
+  NotebookCollaboratorManager,
+  type NotebookCollaboratorState,
+} from '@/lib/collaboration/collaborators';
+import {
   NotebookCrdt,
   mergeCrdtUpdates,
   type NotebookCrdtProjection,
 } from '@/lib/collaboration/crdt';
-import type { CollaborationContact, InvitePayload } from '@/lib/collaboration/types';
+import type {
+  CollaborationContact,
+  CollaborationRole,
+  InvitePayload,
+  NotebookCollaborator,
+} from '@/lib/collaboration/types';
 import { dbService, type Notebook } from '@/lib/db';
 import type { BrowserClient } from '@/lib/xmtp-browser-sdk';
 import {
@@ -84,12 +93,18 @@ export function useNotebookCollaboration({
   debugLoggingEnabled,
 }: UseNotebookCollaborationProps) {
   const [contacts, setContacts] = useState<CollaborationContact[]>([]);
+  const [contactsNotebookId, setContactsNotebookId] = useState<string | null>(null);
   const [status, setStatus] = useState<CollaborationStatus>('idle');
   const [sessionNotebookId, setSessionNotebookId] = useState<string | null>(null);
   const [sessionTopic, setSessionTopic] = useState<string | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [collaborators, setCollaborators] = useState<NotebookCollaborator[]>([]);
+  const [currentUserRole, setCurrentUserRole] = useState<CollaborationRole | null>(null);
+  const [collaboratorsPending, setCollaboratorsPending] = useState(false);
+  const [collaboratorsError, setCollaboratorsError] = useState<string | null>(null);
   const [inviteQueue, setInviteQueue] = useState<InvitePayload[]>([]);
   const sessionRef = useRef<NotebookCollaborationSession | null>(null);
+  const collaboratorManagerRef = useRef<NotebookCollaboratorManager | null>(null);
   const sessionGenerationRef = useRef(0);
   const inviteGenerationRef = useRef(0);
   const inviteActionRef = useRef<string | null>(null);
@@ -97,6 +112,16 @@ export function useNotebookCollaboration({
   const clientRef = useRef<XmtpClientLike | null>(null);
   const inviteDetails = inviteQueue[0] ?? null;
   const inviteModalOpen = inviteDetails !== null;
+
+  const applyCollaboratorState = useCallback((
+    manager: NotebookCollaboratorManager,
+    state: NotebookCollaboratorState,
+  ) => {
+    if (collaboratorManagerRef.current !== manager) return false;
+    setCollaborators(state.collaborators);
+    setCurrentUserRole(state.currentUserRole);
+    return true;
+  }, []);
 
   const client = useMemo<XmtpClientLike | null>(() => {
     if (!rawClient || !userAddress) return null;
@@ -216,21 +241,35 @@ export function useNotebookCollaboration({
     setInviteQueue([]);
   }, [rawClient, xmtpEnv]);
 
-  const addContact = useCallback(async (value: string) => {
-    if (!client) throw new Error('Connect to XMTP first');
-    const resolved = await resolveEnsOrAddress(value, ensResolver);
-    if (contacts.some((contact) => contact.address.toLowerCase() === resolved.address.toLowerCase())) return;
+  const addContact = useCallback(async (value: string, notebookId: string) => {
+    setSessionError(null);
+    try {
+      if (!client) throw new Error('Connect to XMTP first');
+      if (!notebookId) throw new Error('Select a notebook before adding collaborators');
+      const resolved = await resolveEnsOrAddress(value, ensResolver);
+      if (
+        contactsNotebookId === notebookId
+        && contacts.some((contact) => contact.address.toLowerCase() === resolved.address.toLowerCase())
+      ) return;
 
-    const identifier: Identifier = { identifierKind: 'Ethereum', identifier: resolved.address };
-    const reachable = await client.canMessage([identifier]);
-    const canReach = reachable.get(resolved.address) ?? reachable.get(resolved.address.toLowerCase());
-    if (!canReach) throw new Error('Contact is not reachable on the selected XMTP network');
-    setContacts((previous) => [...previous, resolved]);
-  }, [client, contacts, ensResolver]);
+      const identifier: Identifier = { identifierKind: 'Ethereum', identifier: resolved.address };
+      const reachable = await client.canMessage([identifier]);
+      const canReach = reachable.get(resolved.address) ?? reachable.get(resolved.address.toLowerCase());
+      if (!canReach) throw new Error('Contact is not reachable on the selected XMTP network');
+      setContacts((previous) => contactsNotebookId === notebookId
+        ? [...previous, resolved]
+        : [resolved]);
+      setContactsNotebookId(notebookId);
+    } catch (error) {
+      setSessionError(error instanceof Error ? error.message : 'Failed to add collaborator');
+      throw error;
+    }
+  }, [client, contacts, contactsNotebookId, ensResolver]);
 
-  const removeContact = useCallback((address: string) => {
+  const removeContact = useCallback((address: string, notebookId: string) => {
+    if (contactsNotebookId !== notebookId) return;
     setContacts((previous) => previous.filter((contact) => contact.address.toLowerCase() !== address.toLowerCase()));
-  }, []);
+  }, [contactsNotebookId]);
 
   const persistCollaborationState = useCallback((
     notebookId: string,
@@ -435,6 +474,11 @@ export function useNotebookCollaboration({
     const generation = ++sessionGenerationRef.current;
     const activeSession = sessionRef.current;
     sessionRef.current = null;
+    collaboratorManagerRef.current = null;
+    setCollaboratorsPending(false);
+    setCollaboratorsError(null);
+    setCollaborators([]);
+    setCurrentUserRole(null);
     try {
       if (activeSession) await activeSession.stop();
     } finally {
@@ -447,6 +491,33 @@ export function useNotebookCollaboration({
     }
   }, []);
 
+  const loadActiveCollaboratorManager = useCallback(async () => {
+    const existing = collaboratorManagerRef.current;
+    if (existing) return existing;
+    const activeSession = sessionRef.current;
+    const conversationId = activeSession?.topic;
+    if (!rawClient || !activeSession || !conversationId) {
+      throw new Error('Start or resume this notebook collaboration first');
+    }
+
+    await rawClient.conversations.sync();
+    const collaboratorGroup = await rawClient.conversations.getConversationById(conversationId);
+    if (!(collaboratorGroup instanceof Group)) {
+      throw new Error('XMTP notebook collaborator group is not available');
+    }
+    if (sessionRef.current !== activeSession || activeSession.topic !== conversationId) {
+      throw new Error('XMTP collaboration session changed while collaborators were loading');
+    }
+
+    const manager = new NotebookCollaboratorManager({
+      client: rawClient,
+      group: collaboratorGroup,
+      ensResolver,
+    });
+    collaboratorManagerRef.current = manager;
+    return manager;
+  }, [ensResolver, rawClient]);
+
   useEffect(() => () => {
     void stopCollaboration().catch((error) => {
       console.warn('Could not stop XMTP collaboration cleanly', error);
@@ -458,12 +529,17 @@ export function useNotebookCollaboration({
     notebookName: string,
     options: { contacts?: CollaborationContact[]; conversationId?: string | null } = {},
   ) => {
-    if (!client) throw new Error('Connect to XMTP first');
+    if (!client || !rawClient) throw new Error('Connect to XMTP first');
     if (!notebookId) throw new Error('Select a notebook before collaborating');
     const generation = ++sessionGenerationRef.current;
     const isCurrent = () => sessionGenerationRef.current === generation && clientRef.current === client;
     const previousSession = sessionRef.current;
     sessionRef.current = null;
+    collaboratorManagerRef.current = null;
+    setCollaboratorsPending(false);
+    setCollaboratorsError(null);
+    setCollaborators([]);
+    setCurrentUserRole(null);
     try {
       if (previousSession) await previousSession.stop();
     } catch (error) {
@@ -495,6 +571,7 @@ export function useNotebookCollaboration({
     const conversationId = normalizeConversationId(options.conversationId)
       ?? binding?.conversationId
       ?? null;
+    const creatingGroup = conversationId === null;
     const collabSession = new NotebookCollaborationSession({
       notebook: { id: notebook.id, name: notebookName || notebook.name, createdAt: notebook.createdAt, updatedAt: notebook.updatedAt },
       notes,
@@ -536,32 +613,89 @@ export function useNotebookCollaboration({
 
       await onNotebookUpdated?.(updatedNotebook);
       if (!isCurrent() || sessionRef.current !== collabSession) return null;
+      if (creatingGroup && contactsNotebookId === notebookId) {
+        setContacts([]);
+        setContactsNotebookId(null);
+      }
       setSessionNotebookId(notebookId);
       setSessionTopic(nextConversationId);
       setStatus('active');
       keepSession = true;
+
+      // Membership projection is settings data, not a prerequisite for CRDT
+      // transport. Persist and activate the notebook binding first so a
+      // transient member-list failure cannot orphan a newly-created MLS group.
+      setCollaboratorsPending(true);
+      try {
+        await rawClient.conversations.sync();
+        if (!isCurrent() || sessionRef.current !== collabSession) return null;
+        const collaboratorGroup = await rawClient.conversations.getConversationById(nextConversationId);
+        if (!(collaboratorGroup instanceof Group)) {
+          throw new Error('XMTP notebook collaborator group is not available');
+        }
+        const collaboratorManager = new NotebookCollaboratorManager({
+          client: rawClient,
+          group: collaboratorGroup,
+          ensResolver,
+        });
+        collaboratorManagerRef.current = collaboratorManager;
+        const collaboratorState = await collaboratorManager.refresh();
+        if (
+          isCurrent()
+          && sessionRef.current === collabSession
+          && collaboratorManagerRef.current === collaboratorManager
+        ) {
+          applyCollaboratorState(collaboratorManager, collaboratorState);
+        }
+      } catch (error) {
+        if (isCurrent() && sessionRef.current === collabSession) {
+          setCollaboratorsError(error instanceof Error
+            ? error.message
+            : 'Failed to load notebook collaborators');
+        }
+      } finally {
+        if (isCurrent() && sessionRef.current === collabSession) {
+          setCollaboratorsPending(false);
+        }
+      }
       return nextConversationId;
     } finally {
       if (!keepSession) {
+        collaboratorManagerRef.current = null;
+        setCollaborators([]);
+        setCurrentUserRole(null);
         await collabSession.stop().catch((error) => {
           if (debugLoggingEnabled) console.warn('Could not clean up failed XMTP collaboration session', error);
         });
         if (sessionRef.current === collabSession) sessionRef.current = null;
       }
     }
-  }, [client, debugLoggingEnabled, onNotebookUpdated, onRemoteProjection, persistCollaborationState, xmtpEnv]);
+  }, [
+    applyCollaboratorState,
+    client,
+    debugLoggingEnabled,
+    ensResolver,
+    contactsNotebookId,
+    onNotebookUpdated,
+    onRemoteProjection,
+    persistCollaborationState,
+    rawClient,
+    xmtpEnv,
+  ]);
 
   const startCollaboration = useCallback(async (notebookId: string, notebookName: string) => {
     setStatus('starting');
     setSessionError(null);
     try {
-      await startSession(notebookId, notebookName, { contacts });
+      await startSession(notebookId, notebookName, {
+        contacts: contactsNotebookId === notebookId ? contacts : [],
+      });
     } catch (error) {
       sessionRef.current = null;
       setStatus('error');
       setSessionError(error instanceof Error ? error.message : 'Failed to start collaboration');
     }
-  }, [contacts, startSession]);
+  }, [contacts, contactsNotebookId, startSession]);
 
   const resumeCollaboration = useCallback(async (notebookId: string, notebookName: string) => {
     if (sessionRef.current && sessionNotebookId === notebookId) return;
@@ -575,6 +709,96 @@ export function useNotebookCollaboration({
       setSessionError(error instanceof Error ? error.message : 'Failed to resume collaboration');
     }
   }, [sessionNotebookId, startSession]);
+
+  const refreshCollaborators = useCallback(async () => {
+    let manager = collaboratorManagerRef.current;
+    setCollaboratorsPending(true);
+    setCollaboratorsError(null);
+    try {
+      manager ??= await loadActiveCollaboratorManager();
+      const state = await manager.refresh();
+      applyCollaboratorState(manager, state);
+    } catch (error) {
+      if (!manager || collaboratorManagerRef.current === manager) {
+        setCollaboratorsError(error instanceof Error
+          ? error.message
+          : 'Failed to refresh notebook collaborators');
+      }
+    } finally {
+      if (!manager || collaboratorManagerRef.current === manager) setCollaboratorsPending(false);
+    }
+  }, [applyCollaboratorState, loadActiveCollaboratorManager]);
+
+  const addNotebookCollaborator = useCallback(async (
+    value: string,
+    role: CollaborationRole = 'member',
+  ) => {
+    let manager: NotebookCollaboratorManager | null = null;
+    setCollaboratorsPending(true);
+    setCollaboratorsError(null);
+    try {
+      manager = await loadActiveCollaboratorManager();
+      const added = await manager.add(value);
+      let state = added.state;
+      applyCollaboratorState(manager, state);
+      if (role !== 'member') {
+        state = await manager.setRole(added.collaborator.inboxId, role);
+        applyCollaboratorState(manager, state);
+      }
+    } catch (error) {
+      if (!manager || collaboratorManagerRef.current === manager) {
+        setCollaboratorsError(error instanceof Error
+          ? error.message
+          : 'Failed to add notebook collaborator');
+      }
+      throw error;
+    } finally {
+      if (!manager || collaboratorManagerRef.current === manager) setCollaboratorsPending(false);
+    }
+  }, [applyCollaboratorState, loadActiveCollaboratorManager]);
+
+  const changeNotebookCollaboratorRole = useCallback(async (
+    inboxId: string,
+    role: CollaborationRole,
+  ) => {
+    let manager: NotebookCollaboratorManager | null = null;
+    setCollaboratorsPending(true);
+    setCollaboratorsError(null);
+    try {
+      manager = await loadActiveCollaboratorManager();
+      const state = await manager.setRole(inboxId, role);
+      applyCollaboratorState(manager, state);
+    } catch (error) {
+      if (!manager || collaboratorManagerRef.current === manager) {
+        setCollaboratorsError(error instanceof Error
+          ? error.message
+          : 'Failed to change collaborator role');
+      }
+      throw error;
+    } finally {
+      if (!manager || collaboratorManagerRef.current === manager) setCollaboratorsPending(false);
+    }
+  }, [applyCollaboratorState, loadActiveCollaboratorManager]);
+
+  const removeNotebookCollaborator = useCallback(async (inboxId: string) => {
+    let manager: NotebookCollaboratorManager | null = null;
+    setCollaboratorsPending(true);
+    setCollaboratorsError(null);
+    try {
+      manager = await loadActiveCollaboratorManager();
+      const state = await manager.remove(inboxId);
+      applyCollaboratorState(manager, state);
+    } catch (error) {
+      if (!manager || collaboratorManagerRef.current === manager) {
+        setCollaboratorsError(error instanceof Error
+          ? error.message
+          : 'Failed to remove notebook collaborator');
+      }
+      throw error;
+    } finally {
+      if (!manager || collaboratorManagerRef.current === manager) setCollaboratorsPending(false);
+    }
+  }, [applyCollaboratorState, loadActiveCollaboratorManager]);
 
   const broadcastLocalUpdate = useCallback((note: NoteShape) => {
     const activeSession = sessionRef.current;
@@ -749,13 +973,22 @@ export function useNotebookCollaboration({
 
   return {
     contacts,
+    contactsNotebookId,
+    collaborators,
+    currentUserRole,
+    collaboratorsPending,
     status,
     sessionNotebookId,
     sessionTopic,
     error: sessionError,
+    collaboratorsError,
     canCollaborate: !!client,
     addContact,
     removeContact,
+    refreshCollaborators,
+    addNotebookCollaborator,
+    changeNotebookCollaboratorRole,
+    removeNotebookCollaborator,
     startCollaboration,
     resumeCollaboration,
     stopCollaboration,

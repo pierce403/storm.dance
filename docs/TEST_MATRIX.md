@@ -24,7 +24,7 @@ the row currently passes. The 0.2 development checkpoint automates the shared
 Yjs/Yrs fixtures, protocol bounds, browser/CLI simulated transport, schema-2
 nested vault safety (including exact scan-witness revalidation), hosted-web
 fallback, typed Tauri bridge behavior, the live
-three-installation smoke below, and unsigned package builds. Direct native
+four-installation smoke below, and unsigned package builds. Direct native
 libxmtp, installed-artifact launch tests, profile locking, semantic three-way
 file merge, deletion grace/trash, signing, and the remaining client/topology
 rows are explicitly pending.
@@ -33,7 +33,7 @@ rows are explicitly pending.
 
 `.github/workflows/interoperability.yml` runs
 `scripts/live-xmtp-matrix.mjs` on relevant `main` changes and by manual
-dispatch. It uses three disposable wallets, inboxes, installations, encrypted
+dispatch. It uses four disposable wallets, inboxes, installations, encrypted
 SQLite databases, and one XMTP dev group. The roles are real shipped component
 code paths rather than manually labelled CRDT replicas:
 
@@ -42,13 +42,17 @@ code paths rather than manually labelled CRDT replicas:
 | Hosted web | `NotebookCollaborationSession` | Creates the notebook group and snapshot; receives concurrent native edits; sends a later rename |
 | Directory CLI | `NotebookDirectorySync` with `adaptXmtpGroup` | Materializes Markdown, ingests an ordinary file write, sends its Yjs delta, and materializes the later web rename |
 | Tauri webview | `NotebookCollaborationSession` | Receives the snapshot, concurrently edits another text region, and receives the later web rename |
+| Dynamic contributor | `NotebookCollaborationSession` plus native XMTP group roles | Joins only after the three primary sessions are live, catches up, edits and converges, then completes Member → Admin → Member → removed lifecycle checks |
 
 The web and Tauri roles intentionally share `NotebookCollaborationSession`
 because the packaged Tauri application hosts the same React collaboration
 engine as the hosted site. In this headless CI smoke test, a small Node SDK
 adapter supplies that browser-shaped transport so each role can use an
-independent libxmtp database. This validates the shared frontend and directory
-CLI transport paths over the real XMTP dev network; it does not by itself claim
+independent libxmtp database. The dynamic contributor is added by Ethereum
+identifier, and both the owner and contributor independently observe its native
+XMTP role before and after promotion/demotion. This validates the shared
+frontend, contributor lifecycle, and directory CLI transport paths over the
+real XMTP dev network; it does not by itself claim
 that installer launch, native IPC, same-inbox topology, or every scenario below
 has passed. Those remain separate matrix rows and release gates.
 
@@ -85,10 +89,11 @@ Each row is required. “Same inbox” always means distinct XMTP installations 
 distinct local databases; it must not mean two processes sharing one database.
 For each pairing, A→B and B→A are separately asserted.
 
-The current live smoke covers the different-inbox paths CP-03, CP-05, and CP-07
-through the shipped Node directory client and shared web/Tauri collaboration
-engine. CP-05/CP-07 do not yet include packaged Tauri IPC, and none of the
-same-inbox or installed-artifact rows should be inferred from that smoke.
+The current live smoke covers the different-inbox paths CP-01, CP-03, CP-05,
+and CP-07 through the shipped Node directory client and shared web/Tauri
+collaboration engine. CP-05/CP-07 do not yet include packaged Tauri IPC, and
+none of the same-inbox or installed-artifact rows should be inferred from that
+smoke.
 
 | ID | Client A | Client B | XMTP identity topology | T1 simulated | T2 live |
 |---|---|---|---|---|---|
@@ -134,6 +139,21 @@ Every client-pair row runs this scenario set:
 | ID-08 | Invite is allowed, denied, then replayed | Consent transition is idempotent; denied groups do not materialize | T1/T2 |
 | ID-09 | Two native processes open one profile | Exactly one owns the XMTP database; the other uses IPC or exits with a stable lock error | T1/T3 |
 | ID-10 | Identity recovery on a second client | Same inbox, new installation, existing groups and notes become available after sync | T2 |
+| ID-11 | Owner adds a reachable Ethereum identifier after the notebook session is live | XMTP adds the resolved inbox as Member; the new installation receives the welcome and converges through state-vector catch-up | T1/T2 |
+| ID-12 | Super admin promotes then demotes a contributor | Owner and contributor independently observe Admin then Member from native XMTP membership state | T0/T1/T2 |
+| ID-13 | Owner removes a contributor | Current membership omits that inbox; settings refresh does not retain a stale contributor row | T0/T1/T2 |
+
+### Implemented contributor lifecycle coverage
+
+Contributor management is checked at three complementary layers. Deterministic
+manager and UI-state tests cover role normalization, membership mutation
+sequencing, and authorization safeguards without network timing. Existing
+simulated session tests cover existing-group startup and catch-up behavior. The
+gated live smoke then uses
+the XMTP dev network to validate a real welcome, native Member/Admin state from
+two independent databases, CRDT convergence after the late join, demotion, and
+removal. Run the live tier only with `STORMDANCE_LIVE_XMTP=1`; disposable keys
+and databases are deleted in `finally` cleanup.
 
 ## Transport and validation matrix
 
