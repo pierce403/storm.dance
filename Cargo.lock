@@ -3164,7 +3164,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "storm-cli"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -3182,7 +3182,7 @@ dependencies = [
 
 [[package]]
 name = "storm-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -3193,7 +3193,7 @@ dependencies = [
 
 [[package]]
 name = "storm-desktop"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -3208,7 +3208,7 @@ dependencies = [
 
 [[package]]
 name = "storm-protocol"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -3219,7 +3219,7 @@ dependencies = [
 
 [[package]]
 name = "storm-storage"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "atomicwrites",
  "notify",
@@ -3235,7 +3235,7 @@ dependencies = [
 
 [[package]]
 name = "storm-xmtp"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "async-trait",
  "futures",

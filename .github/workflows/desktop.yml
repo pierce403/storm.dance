@@ -140,9 +140,9 @@ jobs:
         run: |
           file "target/${{ matrix.target }}/release/stormdance"
           if [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
-            lipo -verify_arch arm64 "target/${{ matrix.target }}/release/stormdance"
+            lipo "target/${{ matrix.target }}/release/stormdance" -verify_arch arm64
           else
-            lipo -verify_arch x86_64 "target/${{ matrix.target }}/release/stormdance"
+            lipo "target/${{ matrix.target }}/release/stormdance" -verify_arch x86_64
           fi
 
       - name: Archive native CLI

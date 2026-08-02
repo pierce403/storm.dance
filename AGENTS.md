@@ -119,6 +119,7 @@ When working on this project, update this file whenever you learn something dura
 - The app performs IPFS reachability checks on load. Tests should mock those requests unless the test is specifically about live IPFS connectivity.
 - Browser automation can edit note fields without emitting React `onChange`; note saves should use `input` events as the canonical trigger, and direct automation can use `window.stormdance.setNoteContent(noteId, content)` or related helpers.
 - `Mirror::open` canonicalizes its vault root. Synthetic `notify` events in storage tests must use `mirror.root()` rather than the pre-canonical temporary path; those spellings differ on macOS (`/var` versus `/private/var`) and may differ on Windows.
+- Xcode 26.6's `lipo` architecture check requires the input file before the operation: `lipo <input> -verify_arch <arch>`.
 - Rapid title/content edits can race through IndexedDB if saves are allowed to overlap. Preserve the per-note update queue and local merge behavior in `App.tsx` when changing note persistence.
 - Markdown and split rendered panes use a lightweight `contenteditable` rendered document plus DOM-to-Markdown serialization for common structures. Avoid assuming it has the full fidelity of a ProseMirror/TipTap/MDXEditor-style editor unless one of those engines is introduced deliberately.
 - Markdown and split modes share a formatting toolbar. Toolbar actions should update the canonical Markdown text, whether the user last focused the split source textarea or the rendered rich editor.

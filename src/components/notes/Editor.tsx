@@ -29,6 +29,13 @@ import {
 import ReactMarkdown, { type Components } from 'react-markdown';
 import { Note } from '../../lib/db';
 import { rebaseStringEdit } from '../../lib/collaboration/crdt';
+import {
+  applyMarkdownCommandToRenderedText,
+  applyMarkdownCommandToText,
+  toggleTaskInMarkdown,
+  type MarkdownBlockStyle,
+  type MarkdownCommand,
+} from './markdownCommands';
 
 interface EditorProps {
   note: Note | null;
@@ -42,14 +49,6 @@ interface EditorProps {
 }
 
 type EditorMode = 'text' | 'split' | 'markdown';
-type MarkdownBlockStyle = 'paragraph' | 'heading1' | 'heading2' | 'heading3' | 'quote' | 'code-block';
-
-type MarkdownCommand =
-  | { type: 'block'; style: MarkdownBlockStyle }
-  | { type: 'inline'; style: 'bold' | 'italic' | 'code' }
-  | { type: 'list'; style: 'bullet' | 'numbered' | 'task' }
-  | { type: 'insert'; style: 'link' | 'image'; url: string }
-  | { type: 'insert'; style: 'divider' };
 
 interface RichMarkdownEditorHandle {
   applyCommand: (command: MarkdownCommand) => void;
@@ -95,7 +94,6 @@ const LIST_TOOLBAR_ITEMS: Array<{
 ];
 
 const TASK_ITEM_PREFIX_PATTERN = /^\s*\[([ xX])\]\s+(.*)$/;
-const TASK_MARKDOWN_LINE_PATTERN = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([ xX])(\]\s+.*)$/;
 
 function getInitialEditorMode(): EditorMode {
   if (typeof window === 'undefined') return 'text';
@@ -120,174 +118,6 @@ function getTextFromReactNode(node: React.ReactNode): string {
 
 function isNodeInsideElement(node: Node, element: HTMLElement): boolean {
   return node === element || element.contains(node);
-}
-
-function getCurrentLineRange(markdown: string, selectionStart: number, selectionEnd: number) {
-  const lineStart = selectionStart === 0 ? 0 : markdown.lastIndexOf('\n', selectionStart - 1) + 1;
-  const nextLineBreak = markdown.indexOf('\n', selectionEnd);
-  const lineEnd = nextLineBreak === -1 ? markdown.length : nextLineBreak;
-
-  return { start: lineStart, end: lineEnd };
-}
-
-function stripBlockSyntax(line: string): string {
-  return line
-    .replace(/^(\s*)#{1,6}\s+/, '$1')
-    .replace(/^(\s*)>\s?/, '$1')
-    .replace(/^(\s*)(?:[-*+]|\d+[.)])\s+\[[ xX]\]\s+/, '$1')
-    .replace(/^(\s*)(?:[-*+]|\d+[.)])\s+/, '$1');
-}
-
-function transformSelectedMarkdownLines(
-  markdown: string,
-  selectionStart: number,
-  selectionEnd: number,
-  transformLine: (line: string, index: number) => string,
-  emptyLine: string,
-) {
-  const { start, end } = getCurrentLineRange(markdown, selectionStart, selectionEnd);
-  const selected = markdown.slice(start, end);
-  const replacement = selected.trim()
-    ? selected.split('\n').map(transformLine).join('\n')
-    : emptyLine;
-
-  return {
-    markdown: `${markdown.slice(0, start)}${replacement}${markdown.slice(end)}`,
-    selectionStart: start,
-    selectionEnd: start + replacement.length,
-  };
-}
-
-function applyMarkdownCommandToText(
-  markdown: string,
-  selectionStart: number,
-  selectionEnd: number,
-  command: MarkdownCommand,
-) {
-  const selectedText = markdown.slice(selectionStart, selectionEnd);
-  const insert = (replacement: string, innerOffset = 0, innerLength = replacement.length) => ({
-    markdown: `${markdown.slice(0, selectionStart)}${replacement}${markdown.slice(selectionEnd)}`,
-    selectionStart: selectionStart + innerOffset,
-    selectionEnd: selectionStart + innerOffset + innerLength,
-  });
-
-  if (command.type === 'inline') {
-    const fallbackByStyle = {
-      bold: 'bold text',
-      italic: 'italic text',
-      code: 'code',
-    };
-    const markerByStyle = {
-      bold: '**',
-      italic: '*',
-      code: '`',
-    };
-    const innerText = selectedText || fallbackByStyle[command.style];
-    const marker = markerByStyle[command.style];
-    return insert(`${marker}${innerText}${marker}`, marker.length, innerText.length);
-  }
-
-  if (command.type === 'insert') {
-    if (command.style === 'divider') {
-      const prefix = selectionStart > 0 && !markdown.slice(0, selectionStart).endsWith('\n\n') ? '\n\n' : '';
-      const suffix = markdown.slice(selectionEnd).startsWith('\n\n') ? '' : '\n\n';
-      return insert(`${prefix}---${suffix}`, prefix.length, 3);
-    }
-
-    if (command.style === 'link') {
-      const label = selectedText || 'Link text';
-      return insert(`[${label}](${command.url})`, 1, label.length);
-    }
-
-    const altText = selectedText || 'Image alt';
-    return insert(`![${altText}](${command.url})`, 2, altText.length);
-  }
-
-  if (command.type === 'block') {
-    if (command.style === 'code-block') {
-      const codeText = selectedText || 'Code block';
-      return insert(`\`\`\`\n${codeText}\n\`\`\``, 4, codeText.length);
-    }
-
-    return transformSelectedMarkdownLines(
-      markdown,
-      selectionStart,
-      selectionEnd,
-      (line) => {
-        const plainLine = stripBlockSyntax(line).trimStart();
-        const leadingWhitespace = line.match(/^\s*/)?.[0] || '';
-
-        if (command.style === 'paragraph') return `${leadingWhitespace}${plainLine}`;
-        if (command.style === 'quote') return `${leadingWhitespace}> ${plainLine || 'Quote'}`;
-
-        const level = command.style === 'heading1' ? 1 : command.style === 'heading2' ? 2 : 3;
-        return `${leadingWhitespace}${'#'.repeat(level)} ${plainLine || `Heading ${level}`}`;
-      },
-      command.style === 'quote' ? '> Quote' : command.style === 'paragraph' ? 'Paragraph' : `${'#'.repeat(command.style === 'heading1' ? 1 : command.style === 'heading2' ? 2 : 3)} Heading`,
-    );
-  }
-
-  return transformSelectedMarkdownLines(
-    markdown,
-    selectionStart,
-    selectionEnd,
-    (line, index) => {
-      const plainLine = stripBlockSyntax(line).trimStart() || (command.style === 'task' ? 'Task' : 'List item');
-      const leadingWhitespace = line.match(/^\s*/)?.[0] || '';
-
-      if (command.style === 'numbered') return `${leadingWhitespace}${index + 1}. ${plainLine}`;
-      if (command.style === 'task') return `${leadingWhitespace}- [ ] ${plainLine}`;
-      return `${leadingWhitespace}- ${plainLine}`;
-    },
-    command.style === 'numbered' ? '1. List item' : command.style === 'task' ? '- [ ] Task' : '- List item',
-  );
-}
-
-function applyMarkdownCommandToRenderedText(markdown: string, selectedText: string, command: MarkdownCommand) {
-  if (selectedText.trim()) {
-    const selectedTextStart = markdown.indexOf(selectedText);
-    if (selectedTextStart >= 0) {
-      return applyMarkdownCommandToText(
-        markdown,
-        selectedTextStart,
-        selectedTextStart + selectedText.length,
-        command,
-      );
-    }
-  }
-
-  const separator = markdown.trim()
-    ? markdown.endsWith('\n\n')
-      ? ''
-      : markdown.endsWith('\n')
-        ? '\n'
-        : '\n\n'
-    : '';
-  const markdownWithInsertionPoint = `${markdown}${separator}`;
-
-  return applyMarkdownCommandToText(
-    markdownWithInsertionPoint,
-    markdownWithInsertionPoint.length,
-    markdownWithInsertionPoint.length,
-    command,
-  );
-}
-
-function toggleTaskInMarkdown(markdown: string, taskIndex: number, checked: boolean): string {
-  let currentTaskIndex = -1;
-
-  return markdown
-    .split('\n')
-    .map((line) => {
-      const match = TASK_MARKDOWN_LINE_PATTERN.exec(line);
-      if (!match) return line;
-
-      currentTaskIndex += 1;
-      if (currentTaskIndex !== taskIndex) return line;
-
-      return `${match[1]}${checked ? 'x' : ' '}${match[3]}`;
-    })
-    .join('\n');
 }
 
 function serializeInlineNode(node: ChildNode): string {
@@ -551,7 +381,14 @@ const RichMarkdownEditor = React.memo(forwardRef<RichMarkdownEditorHandle, RichM
     return nextMarkdown;
   };
 
-  const handleInput = () => {
+  const handleInput = (event: React.FormEvent<HTMLElement>) => {
+    if (
+      event.target instanceof HTMLInputElement
+      && event.target.dataset.markdownTask === 'true'
+    ) {
+      return;
+    }
+
     syncFromEditorDom();
     captureSelection();
   };
@@ -812,6 +649,12 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
   const currentNoteIdRef = useRef(note?.id || null);
   const richMarkdownEditorRef = useRef<RichMarkdownEditorHandle>(null);
   const lastMarkdownSurfaceRef = useRef<'source' | 'rich'>('rich');
+  const sourceSelectionRef = useRef({
+    noteId: note?.id || null,
+    value: note?.content || '',
+    start: 0,
+    end: 0,
+  });
   const richEditPendingRef = useRef(false);
   const richEditNoteIdRef = useRef<string | null>(null);
   const richEditBaseRef = useRef<string | null>(null);
@@ -848,6 +691,12 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
         if (pendingNoteId && pendingNoteId !== note.id) {
           flushPendingRichEditRef.current(pendingNoteId, false);
         }
+        sourceSelectionRef.current = {
+          noteId: note.id,
+          value: nextContent,
+          start: 0,
+          end: 0,
+        };
       }
 
       titleRef.current = note.title || '';
@@ -989,7 +838,7 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
     const pendingNoteId = richEditNoteIdRef.current;
     if (pendingNoteId) flushPendingRichEditRef.current(pendingNoteId, pendingNoteId === note?.id);
     lastRichInputMarkdownRef.current = null;
-    lastMarkdownSurfaceRef.current = 'source';
+    rememberSourceSelection();
     updateContent(e.currentTarget.value);
   };
 
@@ -998,6 +847,12 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
     if (!textArea) return;
 
     lastMarkdownSurfaceRef.current = 'source';
+    sourceSelectionRef.current = {
+      noteId: note?.id || null,
+      value: textArea.value,
+      start: textArea.selectionStart,
+      end: textArea.selectionEnd,
+    };
   };
 
   const handleMarkdownToolbarCommand = (command: MarkdownCommand) => {
@@ -1005,17 +860,32 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
     const shouldUseSourceTextarea = editorMode === 'split' && textArea && lastMarkdownSurfaceRef.current === 'source';
 
     if (shouldUseSourceTextarea && textArea) {
+      const sourceMarkdown = contentRef.current;
+      const rememberedSelection = sourceSelectionRef.current;
+      const selection = rememberedSelection.noteId === note?.id
+        && rememberedSelection.value === sourceMarkdown
+        ? rememberedSelection
+        : {
+            start: textArea.selectionStart,
+            end: textArea.selectionEnd,
+          };
       const activeSelection = {
-        start: textArea.selectionStart,
-        end: textArea.selectionEnd,
+        start: Math.min(selection.start, sourceMarkdown.length),
+        end: Math.min(Math.max(selection.end, selection.start), sourceMarkdown.length),
       };
       const edit = applyMarkdownCommandToText(
-        textArea.value,
+        sourceMarkdown,
         activeSelection.start,
         activeSelection.end,
         command,
       );
       lastRichInputMarkdownRef.current = null;
+      sourceSelectionRef.current = {
+        noteId: note?.id || null,
+        value: edit.markdown,
+        start: edit.selectionStart,
+        end: edit.selectionEnd,
+      };
       updateContent(edit.markdown);
 
       window.requestAnimationFrame(() => {
@@ -1110,6 +980,7 @@ export function Editor({ note, onUpdateNote, titleInputRef, textAreaRef }: Edito
                 defaultValue={content}
                 onInput={handleContentInput}
                 onFocus={rememberSourceSelection}
+                onBlur={rememberSourceSelection}
                 onKeyUp={rememberSourceSelection}
                 onMouseUp={rememberSourceSelection}
                 onSelect={rememberSourceSelection}
