@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyMarkdownCommandToText,
+  getTaskIndexForMarkdownLine,
   toggleTaskInMarkdown,
 } from './markdownCommands';
 
@@ -31,6 +32,15 @@ describe('source Markdown commands', () => {
 });
 
 describe('task Markdown toggles', () => {
+  it('maps rendered source lines to stable task indexes', () => {
+    const markdown = 'Intro\n- [ ] Duplicate\n\n1. [x] Duplicate';
+
+    expect(getTaskIndexForMarkdownLine(markdown, 2)).toBe(0);
+    expect(getTaskIndexForMarkdownLine(markdown, 4)).toBe(1);
+    expect(getTaskIndexForMarkdownLine(markdown, 1)).toBeNull();
+    expect(getTaskIndexForMarkdownLine(markdown, undefined)).toBeNull();
+  });
+
   it('updates only the selected task marker', () => {
     const markdown = '- [ ] Write tests\n- [x] Ship fix';
 

@@ -32,6 +32,7 @@ import { rebaseStringEdit } from '../../lib/collaboration/crdt';
 import {
   applyMarkdownCommandToRenderedText,
   applyMarkdownCommandToText,
+  getTaskIndexForMarkdownLine,
   toggleTaskInMarkdown,
   type MarkdownBlockStyle,
   type MarkdownCommand,
@@ -237,9 +238,6 @@ interface MarkdownContentProps {
 }
 
 function MarkdownContent({ markdown, onTaskToggle }: MarkdownContentProps) {
-  const taskIndexRef = useRef(0);
-  taskIndexRef.current = 0;
-
   const components: Components = {
     a({ children, ...props }) {
       const { node, ...anchorProps } = props;
@@ -263,16 +261,14 @@ function MarkdownContent({ markdown, onTaskToggle }: MarkdownContentProps) {
     },
     li({ children, ...props }) {
       const { node, ...listItemProps } = props;
-      void node;
       const text = getTextFromReactNode(children).trim();
       const taskMatch = TASK_ITEM_PREFIX_PATTERN.exec(text);
+      const taskIndex = getTaskIndexForMarkdownLine(markdown, node?.position?.start.line);
 
-      if (!taskMatch) {
+      if (!taskMatch || taskIndex === null) {
         return <li {...listItemProps}>{children}</li>;
       }
 
-      const taskIndex = taskIndexRef.current;
-      taskIndexRef.current += 1;
       const checked = taskMatch[1].toLowerCase() === 'x';
       const label = taskMatch[2].trim();
 

@@ -177,18 +177,91 @@ jobs:
           path: stormdance-native-local-only-${{ matrix.label }}.*
           if-no-files-found: error
 
-      # Empty signing/notarization secrets intentionally produce unsigned development
-      # bundles. Configure these repository secrets before promoting packages as signed.
-      - name: Build desktop installers
-        uses: tauri-apps/tauri-action@v1
+      # Tauri treats any non-empty APPLE_CERTIFICATE as a request to sign. Validate the
+      # optional PKCS#12 first so stale or placeholder secrets cannot block development
+      # packaging; a valid certificate is imported again by Tauri in the next step.
+      - name: Validate optional macOS signing certificate
+        if: runner.os == 'macOS'
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+        run: |
+          set -uo pipefail
+
+          if [[ -z "$APPLE_CERTIFICATE" ]]; then
+            echo "::notice::No macOS signing certificate is configured; building an unsigned development DMG."
+            exit 0
+          fi
+
+          certificate_path="$RUNNER_TEMP/stormdance-signing-${{ matrix.label }}.p12"
+          keychain_path="$RUNNER_TEMP/stormdance-signing-${{ matrix.label }}.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+
+          cleanup_signing_check() {
+            security delete-keychain "$keychain_path" >/dev/null 2>&1 || true
+            rm -f "$certificate_path"
+          }
+          trap cleanup_signing_check EXIT
+
+          if ! printf '%s' "$APPLE_CERTIFICATE" | openssl base64 -d -A > "$certificate_path" 2>/dev/null; then
+            echo "::warning::APPLE_CERTIFICATE is not valid base64; building an unsigned development DMG."
+            exit 0
+          fi
+
+          if ! security create-keychain -p "$keychain_password" "$keychain_path" >/dev/null 2>&1 \
+            || ! security unlock-keychain -p "$keychain_password" "$keychain_path" >/dev/null 2>&1 \
+            || ! security import "$certificate_path" -k "$keychain_path" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign >/dev/null 2>&1; then
+            echo "::warning::The macOS signing certificate or password is invalid; building an unsigned development DMG."
+            exit 0
+          fi
+
+          signing_identities="$(security find-identity -v -p codesigning "$keychain_path" 2>/dev/null || true)"
+          if ! grep -Eq '^[[:space:]]*[0-9]+\) [0-9A-Fa-f]{40} ' <<< "$signing_identities"; then
+            echo "::warning::The imported certificate has no valid code-signing identity; building an unsigned development DMG."
+            exit 0
+          fi
+
+          if [[ -n "$APPLE_SIGNING_IDENTITY" ]] && ! grep -Fq "$APPLE_SIGNING_IDENTITY" <<< "$signing_identities"; then
+            echo "::warning::APPLE_SIGNING_IDENTITY does not match the imported certificate; building an unsigned development DMG."
+            exit 0
+          fi
+
+          export_for_tauri() {
+            local name="$1"
+            local value="$2"
+            local delimiter="STORMDANCE_${name}_$(openssl rand -hex 12)"
+            {
+              echo "$name<<$delimiter"
+              printf '%s\n' "$value"
+              echo "$delimiter"
+            } >> "$GITHUB_ENV"
+          }
+
+          export_for_tauri APPLE_CERTIFICATE "$APPLE_CERTIFICATE"
+          export_for_tauri APPLE_CERTIFICATE_PASSWORD "$APPLE_CERTIFICATE_PASSWORD"
+          if [[ -n "$APPLE_SIGNING_IDENTITY" ]]; then
+            export_for_tauri APPLE_SIGNING_IDENTITY "$APPLE_SIGNING_IDENTITY"
+          fi
+
+          if [[ -n "$APPLE_API_ISSUER" || -n "$APPLE_API_KEY" || -n "$APPLE_API_KEY_PATH" ]]; then
+            if [[ -n "$APPLE_API_ISSUER" && -n "$APPLE_API_KEY" && -r "$APPLE_API_KEY_PATH" ]]; then
+              export_for_tauri APPLE_API_ISSUER "$APPLE_API_ISSUER"
+              export_for_tauri APPLE_API_KEY "$APPLE_API_KEY"
+              export_for_tauri APPLE_API_KEY_PATH "$APPLE_API_KEY_PATH"
+            else
+              echo "::warning::Notarization credentials are incomplete or APPLE_API_KEY_PATH is unreadable; signing without notarization."
+            fi
+          fi
+
+      - name: Build desktop installers
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
           uploadWorkflowArtifacts: true

@@ -9,6 +9,30 @@ export type MarkdownCommand =
 
 const TASK_MARKDOWN_LINE_PATTERN = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([ xX])(\]\s+.*)$/;
 
+export function getTaskIndexForMarkdownLine(
+  markdown: string,
+  sourceLineNumber: number | undefined,
+): number | null {
+  if (
+    sourceLineNumber === undefined
+    || !Number.isInteger(sourceLineNumber)
+    || sourceLineNumber < 1
+  ) {
+    return null;
+  }
+
+  const lines = markdown.split('\n');
+  const sourceLineIndex = sourceLineNumber - 1;
+  if (!TASK_MARKDOWN_LINE_PATTERN.test(lines[sourceLineIndex] || '')) return null;
+
+  let taskIndex = 0;
+  for (let lineIndex = 0; lineIndex < sourceLineIndex; lineIndex += 1) {
+    if (TASK_MARKDOWN_LINE_PATTERN.test(lines[lineIndex])) taskIndex += 1;
+  }
+
+  return taskIndex;
+}
+
 function getCurrentLineRange(markdown: string, selectionStart: number, selectionEnd: number) {
   const lineStart = selectionStart === 0 ? 0 : markdown.lastIndexOf('\n', selectionStart - 1) + 1;
   const nextLineBreak = markdown.indexOf('\n', selectionEnd);

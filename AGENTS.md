@@ -66,6 +66,7 @@ When working on this project, update this file whenever you learn something dura
     - Keep workflow Actions on current non-deprecated major versions. As of 2026-05-11, that means `actions/checkout@v6`, `actions/setup-node@v6`, `actions/configure-pages@v6`, `actions/upload-pages-artifact@v5`, `actions/deploy-pages@v5`, and `actions/upload-artifact@v7`.
     - Before changing workflow Action majors, verify current official releases with `gh release list --repo actions/<action-name> --limit 5`.
     - `tsc -b` cannot be used with `--skipLibCheck`.
+    - Tauri checks whether `APPLE_CERTIFICATE` and `APPLE_CERTIFICATE_PASSWORD` exist, not whether their values are non-empty. Keep optional macOS signing variables out of the desktop build environment unless the PKCS#12/password/identity preflight succeeds; assigning empty secret expressions still triggers a failing certificate import.
 
 ## Playwright
 - E2E specs live in `e2e/`.
@@ -131,5 +132,6 @@ When working on this project, update this file whenever you learn something dura
 - Markdown and split rendered panes use a lightweight `contenteditable` rendered document plus DOM-to-Markdown serialization for common structures. Avoid assuming it has the full fidelity of a ProseMirror/TipTap/MDXEditor-style editor unless one of those engines is introduced deliberately.
 - Markdown and split modes share a formatting toolbar. Toolbar actions should update the canonical Markdown text, whether the user last focused the split source textarea or the rendered rich editor.
 - Task list checkboxes are implemented by recognizing Markdown list items that start with `[ ]` or `[x]`; checkbox toggles must update the source Markdown line, not only the rendered input state.
+- React Strict Mode may render `react-markdown` component overrides more than once. Keep render callbacks pure: derive task ordinals from the AST source position rather than incrementing refs during render.
 - `npm run lint` currently reports pre-existing app-wide lint debt. Run targeted ESLint on files you touch, and keep broad cleanup separate from feature work.
 - Vitest discovers both `src/**/*.test.ts` and `cli/**/*.test.ts`; keep CLI filesystem/network tests deterministic with temporary directories and fake XMTP group adapters.
