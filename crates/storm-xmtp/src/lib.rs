@@ -102,6 +102,8 @@ impl SyncError {
     }
 }
 
+// async_trait adds #[must_use] to futures whose Result is already must-use.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait XmtpTransport: Send + Sync + 'static {
     async fn inbox_id(&self) -> Result<String, TransportError>;
