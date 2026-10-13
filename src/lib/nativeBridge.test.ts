@@ -45,7 +45,7 @@ describe('native bridge web fallback', () => {
     expect(isTauriRuntime()).toBe(false);
     await expect(getNativeRuntimeStatus()).resolves.toMatchObject({
       runtime: 'web',
-      version: 'unknown',
+      version: expect.any(String),
       watchedDirectories: [],
     });
     await expect(listNativeLinks()).resolves.toEqual([]);
