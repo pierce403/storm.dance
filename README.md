@@ -234,3 +234,8 @@ findings. Seven advisory paths remain in the Tailwind3 build tree; braces3.0.3
 has no patched release in its primary advisory. A Tailwind4 migration needs
 separate CSS validation. Wallet, XMTP, CRDT and browser storage dependencies
 were preserved.
+
+October14Cloudflare hosting acceptance passed: exact native route build/version,
+managed HTTPS, all generated asset comparisons, real404, browser rendering,
+received visits and request/status metrics. Existing local data was not reset.
+Hosting acceptance does not expand wallet, messaging, hardware or PWA-device claims.
