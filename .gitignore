@@ -28,3 +28,6 @@ src-tauri/target
 *.njsproj
 *.sln
 *.sw?
+
+.wrangler/
+.cloudflare-check/

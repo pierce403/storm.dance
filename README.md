@@ -220,3 +220,17 @@ workspace target directory selected by Cargo).
 ## License
 
 Apache-2.0; see [LICENSE](./LICENSE).
+
+## Cloudflare hosting
+
+Native Git publishes `main` with `npm run build:cloudflare` and `npm run deploy`.
+The original generator and GitHub Pages build remain available for recovery.
+Cloudflare-only postprocessing adds a no-store revision marker and terminal404;
+previews are disabled and deployment credentials stay in Cloudflare.
+Application source, local data formats and existing public URLs are preserved.
+
+Build-tool follow-up: the compatible security refresh removed critical test-tool
+findings. Seven advisory paths remain in the Tailwind3 build tree; braces3.0.3
+has no patched release in its primary advisory. A Tailwind4 migration needs
+separate CSS validation. Wallet, XMTP, CRDT and browser storage dependencies
+were preserved.

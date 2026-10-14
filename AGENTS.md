@@ -135,3 +135,5 @@ When working on this project, update this file whenever you learn something dura
 - React Strict Mode may render `react-markdown` component overrides more than once. Keep render callbacks pure: derive task ordinals from the AST source position rather than incrementing refs during render.
 - `npm run lint` currently reports pre-existing app-wide lint debt. Run targeted ESLint on files you touch, and keep broad cleanup separate from feature work.
 - Vitest discovers both `src/**/*.test.ts` and `cli/**/*.test.ts`; keep CLI filesystem/network tests deterministic with temporary directories and fake XMTP group adapters.
+
+- October14Cloudflare port: keep the existing generator/Pages recovery and use `build:cloudflare` for revision/artifact manifests and terminal404. Compatible lock repairs plus Vitest4.1.11 remove the two critical test-tool findings;143tests and build pass. XMTP browser5.0.1/node6.1.0, ethers6.17.0, React18.3.1 and Yjs13.6.31 remain unchanged. Seven Tailwind build-tool advisory paths remain: the primary braces advisory has no patched release, and npm proposes a separate Tailwind4 framework migration. Do not force that CSS migration as a hosting fix.

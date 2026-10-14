@@ -334,3 +334,14 @@ This is the canonical feature inventory for storm.dance. Each feature declares a
 - Pressing `Tab` while focused on a column container cycles Notebooks -> Notes -> Editor.
 - Editable elements such as `input`, `textarea`, `select`, `button`, and `contenteditable` bypass custom tab handling.
 - Pressing `n` in the notes tree creates a note in the focused folder or in the focused note's folder.
+
+### Native Cloudflare static hosting
+
+- **Stability**: in-progress
+- **Description**: Publish the existing browser app through native Git without changing local persistence or integration semantics.
+- **Properties**:
+  - Original generators, app paths and any PWA URLs remain.
+  - Credentials stay in Cloudflare; previews stay off; Pages remains recovery.
+- **Test Criteria**:
+  - [x] Locked install, meaningful existing tests, build and Worker dry run pass.
+  - [ ] Exact native build/version/routes, custom-host HTTPS, real404, browser behavior and usage metrics pass.
