@@ -102,6 +102,9 @@ impl SyncError {
     }
 }
 
+// `async_trait` expands each method to a pinned boxed future, which is already
+// `must_use`; Rust 1.99's Clippy otherwise flags the macro-generated attribute.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait XmtpTransport: Send + Sync + 'static {
     async fn inbox_id(&self) -> Result<String, TransportError>;
